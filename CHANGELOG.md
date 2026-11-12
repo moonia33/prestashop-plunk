@@ -6,6 +6,11 @@ All notable changes to `plunkconnect` are documented here.
 
 ### Fixed (production, baltijoszvynas.lt)
 
+- Webhook returned 500: `Db::getValue('SHOW TABLES LIKE …')` appends `LIMIT 1` and MariaDB answers 1064. All four sites now use `executeS()` (subscription apply/guests, back-in-stock table check, reconcile command) with a regression test.
+- Double opt-in repeated signup no longer unsubscribes existing subscribers: the outbox worker looks the contact up in Plunk (`GET /contacts?search=`) before a `newsletter.signup_requested` and drops `subscribed:false` when the contact is already subscribed (protects the Newsman import).
+- `applyWebhook` now returns `matched` (SELECT COUNT) alongside affected rows so an unchanged value doesn't look like a missing contact.
+
+
 - BO fatal `Class "PlunkConnect\Command\ProcessOutboxCommand" cannot be found`: the Symfony container compiles module commands before the module autoloader loads, so `config/services.yml` now ships as `services.yml.dist` and is materialised by `install()`/`upgrade` only when `vendor/autoload.php` exists. Release zips must be built with `composer install --no-dev -o`.
 - Outbox rows waited ~1 h: `next_attempt_at`/`date_upd`/`date_exp`/`date_add` are written with PHP time (Europe/Vilnius) but compared against MySQL `NOW()` (Europe/Berlin). All comparisons now use PHP `date()`; regression test `testNoNowInSqlSources` guards the rule.
 - `available` was `true` for out-of-stock products when `out_of_stock = 2`: mode 2 means "shop default", it now correctly resolves `PS_ORDER_OUT_OF_STOCK`.

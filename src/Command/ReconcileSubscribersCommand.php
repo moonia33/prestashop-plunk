@@ -89,7 +89,7 @@ class ReconcileSubscribersCommand extends Command
         if ($customer > 0) {
             return true;
         }
-        if ($db->getValue('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
+        if ($db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
             return (int) $db->getValue(
                 'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
                  WHERE `email` = \'' . pSQL($email) . '\' AND `active` = 1'

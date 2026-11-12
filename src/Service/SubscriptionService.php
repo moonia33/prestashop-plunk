@@ -82,7 +82,7 @@ final class SubscriptionService
      * Apply a Plunk webhook to PrestaShop subscription sources.
      * Idempotent: UPDATEs are no-ops when the flag already matches.
      *
-     * @return array{customer_rows:int,emailsubscription_rows:int}
+     * @return array{customer_rows:int,emailsubscription_rows:int,matched:int}
      */
     public static function applyWebhook(string $email, bool $subscribed, ?int $idShop = null): array
     {
@@ -93,6 +93,13 @@ final class SubscriptionService
             $shopFilter = ' AND `id_shop` = ' . $idShop;
         }
 
+        // matched = rows that exist (affected_rows stays 0 when the value
+        // is unchanged, which looks like "contact missing" in the response).
+        $customerMatched = (int) $db->getValue(
+            'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
+             WHERE `email` = \'' . pSQL($email) . '\'' . $shopFilter
+        );
+
         $db->execute(
             'UPDATE `' . _DB_PREFIX_ . 'customer`
              SET `newsletter` = ' . $flag . ', `date_upd` = \'' . pSQL(date('Y-m-d H:i:s')) . '\'
@@ -101,8 +108,13 @@ final class SubscriptionService
         $customerRows = (int) $db->Affected_Rows();
 
         $guestRows = 0;
+        $guestMatched = 0;
         // ps_emailsubscription exists only when the module is installed.
-        if ($db->getValue('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
+        if ($db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
+            $guestMatched = (int) $db->getValue(
+                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
+                 WHERE `email` = \'' . pSQL($email) . '\'' . $shopFilter
+            );
             $db->execute(
                 'UPDATE `' . _DB_PREFIX_ . 'emailsubscription`
                  SET `active` = ' . $flag . '
@@ -111,7 +123,11 @@ final class SubscriptionService
             $guestRows = (int) $db->Affected_Rows();
         }
 
-        return ['customer_rows' => $customerRows, 'emailsubscription_rows' => $guestRows];
+        return [
+            'customer_rows' => $customerRows,
+            'emailsubscription_rows' => $guestRows,
+            'matched' => $customerMatched + $guestMatched,
+        ];
     }
 
     /**
@@ -119,7 +135,7 @@ final class SubscriptionService
      */
     public static function guestSubscribers(string $since, ?int $idShop = null): array
     {
-        if (!\Db::getInstance()->getValue('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
+        if (!\Db::getInstance()->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
             return [];
         }
         $shopFilter = null !== $idShop ? ' AND `id_shop` = ' . $idShop : '';

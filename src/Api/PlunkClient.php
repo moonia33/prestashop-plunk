@@ -114,6 +114,21 @@ final class PlunkClient
     }
 
     /**
+     * GET /contacts?search=<email> - used by the double-opt-in guard in
+     * the worker (spec 7.2) to check whether the contact already is
+     * subscribed before sending subscribed:false.
+     */
+    public function searchContactResponse(string $email): array
+    {
+        return $this->request(
+            'GET',
+            '/contacts?limit=5&search=' . rawurlencode($email),
+            $this->secretKey,
+            null
+        );
+    }
+
+    /**
      * Low-level request helper.
      *
      * @return array{status:int,body:?array,retryAfter:?int,error:?string,raw:string}

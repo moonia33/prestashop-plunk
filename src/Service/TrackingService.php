@@ -337,7 +337,7 @@ final class TrackingService
         if (!Config::getBool(Config::FEAT_BACKINSTOCK) || !Config::isConfigured() || $quantity <= 0) {
             return;
         }
-        if (!\Db::getInstance()->getValue('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'mailalert_customer_oos\'')) {
+        if (!\Db::getInstance()->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'mailalert_customer_oos\'')) {
             return;
         }
         $idShop = (int) (\Context::getContext()->shop->id ?? 0);

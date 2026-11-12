@@ -93,3 +93,22 @@ Pataisyti:
 - Produkto įvykiuose `id` yra int, o `productId` – string. Palik `productId` kaip pagrindinį lauką. Kai pasirinkta kombinacija (`combinationId > 0`), `productId` turi būti `"<id_product>-<id_product_attribute>"`, kaip kataloge. Patikrink `cart.items` ir `order.items` su variantine preke.
 - `recentlyViewed` siųsk kaip string ID masyvą (`["1602178", …]`), kad sutaptų su katalogu.
 - Wrapper `{value, persistent:false}` palik. Plunk jį dabar išvynioja pats: šablonuose rašoma `event.cart.items`, ne `event.cart.value.items`.
+
+## 7. Prenumeratų ir double opt-in testo radiniai (2026-11-12)
+
+Testas su `pranesimai@info.baltijoszvynas.lt`: `newsletter.signup_requested` → Plunk patvirtinimo laiškas → paspaudimas → `contact.subscribed` → WEBHOOK į `/module/plunkconnect/webhook` (Bearer). Plunk pusė veikia.
+
+### 7.1 Webhook grąžindavo 500 (pataisyta produkcijoje, perkelti į repo)
+`Db::getValue('SHOW TABLES LIKE ...')` prideda `LIMIT 1` → MariaDB 1064 → `PrestaShopException` → 500. Produkcijoje visose 4 vietose pakeista į `executeS(...)`:
+- `src/Service/SubscriptionService.php` (2 vietos: `applyWebhook`, `guestSubscribers`);
+- `src/Service/TrackingService.php` (`mailalert_customer_oos`);
+- `src/Command/ReconcileSubscribersCommand.php`.
+Pridėk regresijos testą, kad `getValue('SHOW` / `getRow('SHOW` neatsirastų šaltiniuose (kaip `testNoNowInSqlSources`).
+
+### 7.2 Jau prenumeruojantis kontaktas atsiprenumeruojamas (būtina pataisyti prieš cutover)
+`SubscriptionService::signup()` su įjungtu double opt-in visada siunčia `subscribed:false`. Jei kontaktas Plunk'e jau `subscribed=true` (pvz. 3852 importuoti iš Newsman), formos pakartotinis pateikimas jį atsiprenumeruoja Plunk'e, Plunk sukuria `contact.unsubscribed`, o webhook'as nuima `newsletter` PrestaShop'e. Teste tai įvyko (`contact.unsubscribed` 16:47:02 UTC prieš `newsletter.signup_requested`).
+Plunk: jei `subscribed` nenurodytas, naujas kontaktas sukuriamas kaip `subscribed=true`, todėl lauko praleisti negalima.
+Sprendimas (outbox worker'yje, ne pirkėjo užklausoje): prieš `signup` įvykį `GET /contacts?search=<email>` (arba `GET /contacts/:id` jei žinomas). Jei kontaktas yra ir `subscribed=true` → siųsti `newsletter.signup_requested` **be** `subscribed` lauko (arba nesiųsti visai). Jei nėra arba `subscribed=false` → `subscribed:false` kaip dabar. Testas abiem atvejams.
+
+### 7.3 Smulkmena
+`applyWebhook` grąžina `customer_rows:0`, kai reikšmė nepasikeitė (MySQL affected rows). Ne klaida, bet atsakyme verta grąžinti `matched` (SELECT COUNT) diagnostikai.

@@ -141,6 +141,34 @@ final class OutboxProcessor
     }
 
     /**
+     * If a Plunk contact matching the event email already is subscribed,
+     * remove `subscribed:false` from the payload so the track event cannot
+     * unsubscribe it (spec 7.2). Pure function - unit-tested.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<int, mixed> $contacts
+     *
+     * @return array<string, mixed>
+     */
+    public static function dropSubscribedForSubscribedContact(array $payload, array $contacts): array
+    {
+        $email = (string) ($payload['email'] ?? '');
+        if ('' === $email || !array_key_exists('subscribed', $payload)) {
+            return $payload;
+        }
+        foreach ($contacts as $contact) {
+            if (is_array($contact)
+                && 0 === strcasecmp((string) ($contact['email'] ?? ''), $email)
+                && !empty($contact['subscribed'])) {
+                unset($payload['subscribed']);
+                break;
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
      * Route one outbox row to the right Plunk endpoint.
      *
      * @return array{status:int,retryAfter:?int,error:?string}
@@ -154,6 +182,24 @@ final class OutboxProcessor
 
         switch ($row['endpoint']) {
             case 'track':
+                // Double-opt-in guard (spec 7.2): a repeated signup must
+                // not unsubscribe a contact that is already subscribed in
+                // Plunk (e.g. subscribers imported from Newsman). Check in
+                // the worker - never inside the customer's request.
+                if ('newsletter.signup_requested' === ($payload['event'] ?? '')
+                    && false === ($payload['subscribed'] ?? null)
+                    && '' !== (string) ($payload['email'] ?? '')) {
+                    $lookup = $client->searchContactResponse((string) $payload['email']);
+                    $lookupStatus = (int) ($lookup['status'] ?? 0);
+                    if (0 === $lookupStatus || 429 === $lookupStatus || $lookupStatus >= 500) {
+                        return $lookup; // transient - retry the whole event
+                    }
+                    if (200 === $lookupStatus) {
+                        $contacts = (array) ($lookup['body']['data'] ?? $lookup['body']['contacts'] ?? []);
+                        $payload = self::dropSubscribedForSubscribedContact($payload, $contacts);
+                    }
+                }
+
                 return $client->track($payload, $row['uuid']);
 
             case 'contacts':
