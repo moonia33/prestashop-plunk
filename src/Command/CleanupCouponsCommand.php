@@ -35,7 +35,7 @@ class CleanupCouponsCommand extends Command
              FROM `' . _DB_PREFIX_ . 'plunk_coupon` c
              LEFT JOIN `' . _DB_PREFIX_ . 'order_cart_rule` ocr
                ON ocr.`id_cart_rule` = c.`id_cart_rule`
-             WHERE c.`date_exp` < NOW()
+             WHERE c.`date_exp` < \'' . pSQL(date('Y-m-d H:i:s')) . '\'
                AND ocr.`id_order_cart_rule` IS NULL'
         );
 

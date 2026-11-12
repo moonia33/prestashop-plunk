@@ -36,7 +36,7 @@ final class OutboxProcessor
         $ids = array_map('intval', array_column($db->executeS(
             'SELECT `id_outbox` FROM `' . $table . '`
              WHERE `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\'
-               AND `next_attempt_at` <= NOW()
+               AND `next_attempt_at` <= \'' . pSQL(date('Y-m-d H:i:s')) . '\'
              ORDER BY `id_outbox` ASC
              LIMIT ' . max(1, $limit)
         ) ?: [], 'id_outbox'));
@@ -46,7 +46,7 @@ final class OutboxProcessor
             'UPDATE `' . $table . '`
              SET `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\', `locked_by` = NULL
              WHERE `status` = \'' . pSQL(Outbox::STATUS_PROCESSING) . '\'
-               AND `date_upd` < DATE_SUB(NOW(), INTERVAL 10 MINUTE)'
+               AND `date_upd` < \'' . pSQL(date('Y-m-d H:i:s', time() - 600)) . '\''
         );
 
         if (!$ids) {
@@ -58,7 +58,7 @@ final class OutboxProcessor
             'UPDATE `' . $table . '`
              SET `status` = \'' . pSQL(Outbox::STATUS_PROCESSING) . '\',
                  `locked_by` = \'' . pSQL($tag) . '\',
-                 `date_upd` = NOW()
+                 `date_upd` = \'' . pSQL(date('Y-m-d H:i:s')) . '\'
              WHERE `id_outbox` IN (' . implode(',', $ids) . ')
                AND `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\''
         );
@@ -310,7 +310,7 @@ final class OutboxProcessor
             \Db::getInstance()->execute(
                 'DELETE FROM `' . $table . '`
                  WHERE `status` = \'' . pSQL(Outbox::STATUS_SENT) . '\'
-                   AND `date_upd` < DATE_SUB(NOW(), INTERVAL 7 DAY)
+                   AND `date_upd` < \'' . pSQL(date('Y-m-d H:i:s', time() - 7 * 86400)) . '\'
                  LIMIT 1000'
             );
             $affected = (int) \Db::getInstance()->Affected_Rows();

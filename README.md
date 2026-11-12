@@ -12,7 +12,7 @@ PrestaShop module connecting a shop to a self-hosted Plunk instance (replaces `n
 
 ### Diegimas
 
-1. Nukopijuokite `plunkconnect/` į `modules/` (arba zip→Moduliai→Įkelti modulį). Composer'io nereikia – yra integruotas PSR-4 autoloader'is (`autoload.php`); jei paleisite `composer install`, bus naudojamas `vendor/autoload.php`.
+1. Nukopijuokite `plunkconnect/` į `modules/` (arba zip→Moduliai→Įkelti modulį). Jei reikalingos konsolės komandos (`bin/console plunkconnect:*`), release zip'e **privalo būti `vendor/`** (`composer install --no-dev -o` arba bent `composer dump-autoload -o --no-dev`). PrestaShop Symfony konteineris kompiliuojamas prieš įkeliant modulio `autoload.php` – komandų klases jis randa tik per `modules/plunkconnect/vendor/autoload.php`. Be `vendor/` modulis vis tiek veikia (yra PSR-4 fallback), tik `config/services.yml` tada nekopijuojamas (modulis automatiškai jį sukuria iš `services.yml.dist`, kai vendor atsiranda) – todėl BO niekada nelūš.
 2. Įdiekite per *Moduliai → Module Manager* arba `php bin/console prestashop:module install plunkconnect`.
 3. Modulis gali veikti kartu su `newsmanapp` perėjimo laikotarpiui – konfliktų nėra.
 
@@ -36,10 +36,15 @@ PrestaShop module connecting a shop to a self-hosted Plunk instance (replaces `n
 Jokio sinchroninio HTTP pirkėjo užklausoje – viskas eina per `PREFIX_plunk_outbox` ir worker'į:
 
 ```cron
-* * * * * php /path/bin/console plunkconnect:outbox:process
+# produkcinis layout (/etc/cron.d/<svetaine>), flock saugo nuo overlap'o
+* * * * *        flock -n /tmp/plunk-outbox.lock   php bin/console plunkconnect:outbox:process --limit=200 --max-seconds=50
+7,22,37,52 * * * *  flock -n /tmp/plunk-catalog.lock  php bin/console plunkconnect:catalog:sync
+0 3 * * *        flock -n /tmp/plunk-catalog-full.lock php bin/console plunkconnect:catalog:sync --full
 ```
 
-Atsarginis variantas be CLI: `GET /module/plunkconnect/cron?token=<cron token>` kas minutę.
+Atsarginis variantas be CLI: `GET /module/plunkconnect/cron?token=<cron token>` kas minutę
+(paleidžia outbox worker'į ir, kai `FEAT_CATALOG_SYNC` įjungtas, inkrementinį sync kas ~15 min
+bei pilną 03:00–05:00, ne dažniau 1×/20 h).
 
 ### Endpointai
 

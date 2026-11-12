@@ -161,7 +161,7 @@ final class CatalogMapper
             'id' => $plunkId,
             'price' => $this->money($price),
             'salePrice' => ($sale > 0 && $sale < $price) ? $this->money($sale) : null,
-            'available' => $this->isAvailable($row, $quantity),
+            'available' => self::isAvailable($row, $quantity),
             'quantity' => max(0, $quantity),
         ];
     }
@@ -243,7 +243,7 @@ final class CatalogMapper
             'price' => $this->money($price),
             'salePrice' => ($sale > 0 && $sale < $price) ? $this->money($sale) : null,
             'currency' => 'EUR',
-            'available' => $this->isAvailable($row, $quantity),
+            'available' => self::isAvailable($row, $quantity),
             'quantity' => max(0, $quantity),
             'brand' => (string) ($row['manufacturer'] ?? ''),
             'categories' => $categoryNames,
@@ -270,11 +270,25 @@ final class CatalogMapper
     }
 
     /**
-     * @param array<string, mixed> $row
+     * CLI has no request scheme, so Link may return http:// or //host.
+     * Returns the https URL, or null when it cannot be upgraded.
      */
-    private function isAvailable(array $row, int $quantity): bool
+    public static function httpsUrl(string $url): ?string
     {
-        $outOfStockAllowed = in_array((int) ($row['out_of_stock'] ?? 0), [1, 2], true); // allow, or shop default
+        if (0 === strpos($url, '//')) {
+            $url = 'https:' . $url;
+        } elseif (0 === strpos($url, 'http://') && \Configuration::get('PS_SSL_ENABLED')) {
+            $url = 'https://' . substr($url, 7);
+        }
+
+        return preg_match('#^https://#', $url) ? $url : null;
+    }
+
+    public static function isAvailable(array $row, int $quantity): bool
+    {
+        // out_of_stock: 0 deny, 1 allow, 2 follow the shop default (PS_ORDER_OUT_OF_STOCK).
+        $mode = (int) ($row['out_of_stock'] ?? 2);
+        $outOfStockAllowed = 1 === $mode || (2 === $mode && (bool) \Configuration::get('PS_ORDER_OUT_OF_STOCK'));
 
         return 1 === (int) ($row['active'] ?? 0)
             && 'none' !== (string) ($row['visibility'] ?? 'both')
@@ -351,7 +365,8 @@ final class CatalogMapper
                 continue;
             }
             $url = $link->getImageLink((string) $row['link_rewrite'], $idProduct . '-' . (int) $row['id_image'], 'large_default');
-            if (preg_match('#^https://#', $url)) {
+            $url = self::httpsUrl($url);
+            if (null !== $url) {
                 $out[$idProduct][] = $url;
             }
         }
@@ -427,7 +442,8 @@ final class CatalogMapper
              INNER JOIN `' . _DB_PREFIX_ . 'category_lang` cl
                 ON cl.`id_category` = c.`id_category` AND cl.`id_shop` = ' . $idShop . '
                 AND cl.`id_lang` = ' . $idLang . '
-             WHERE c.`active` = 1 AND c.`id_parent` > 0'
+             WHERE c.`active` = 1 AND c.`id_parent` > 0
+               AND c.`id_category` NOT IN (' . (int) \Configuration::get('PS_ROOT_CATEGORY') . ', ' . (int) \Configuration::get('PS_HOME_CATEGORY') . ')'
         ) ?: [];
 
         $map = [];

@@ -79,10 +79,28 @@ class Plunkconnect extends Module
 
     public function install(): bool
     {
+        $this->enableServicesYaml();
+
         return parent::install()
             && $this->registerHook(self::HOOKS)
             && $this->runSql('install')
             && $this->installDefaults();
+    }
+
+    /**
+     * The Symfony container compiles module commands from
+     * config/services.yml BEFORE the module autoloader is available -
+     * classes resolve only through modules/<name>/vendor/autoload.php.
+     * Ship the file only when vendor exists so BO never fatals on
+     * "Class PlunkConnect\Command\* cannot be found".
+     */
+    public function enableServicesYaml(): void
+    {
+        $src = __DIR__ . '/config/services.yml.dist';
+        $dst = __DIR__ . '/config/services.yml';
+        if (file_exists($src) && file_exists(__DIR__ . '/vendor/autoload.php') && !file_exists($dst)) {
+            copy($src, $dst);
+        }
     }
 
     public function uninstall(): bool

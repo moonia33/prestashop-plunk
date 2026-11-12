@@ -202,8 +202,11 @@ class Configuration
     /** @return string|int|float|bool|null */
     public static function get($key, ?int $idLang = null, ?int $idShopGroup = null, ?int $idShop = null, $default = false)
     {
-        return $default;
+        return self::$testValues[$key] ?? $default;
     }
+
+    /** @var array<string, string|int|float|bool|null> */
+    public static array $testValues = [];
 
     public static function updateValue(string $key, $value, bool $html = false, ?int $idShopGroup = null, ?int $idShop = null): bool
     {

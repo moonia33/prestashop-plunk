@@ -95,7 +95,7 @@ final class SubscriptionService
 
         $db->execute(
             'UPDATE `' . _DB_PREFIX_ . 'customer`
-             SET `newsletter` = ' . $flag . ', `date_upd` = NOW()
+             SET `newsletter` = ' . $flag . ', `date_upd` = \'' . pSQL(date('Y-m-d H:i:s')) . '\'
              WHERE `email` = \'' . pSQL($email) . '\'' . $shopFilter
         );
         $customerRows = (int) $db->Affected_Rows();

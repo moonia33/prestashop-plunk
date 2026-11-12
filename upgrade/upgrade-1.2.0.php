@@ -11,6 +11,8 @@ if (!defined('_PS_VERSION_')) {
 
 function upgrade_module_1_2_0(Plunkconnect $module): bool
 {
+    $module->enableServicesYaml();
+
     $hooks = [
         'actionProductAdd',
         'actionProductUpdate',

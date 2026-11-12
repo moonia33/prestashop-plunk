@@ -5,6 +5,7 @@
  * minimal Validate stub for the framework-agnostic classes under test.
  */
 require_once dirname(__DIR__) . '/autoload.php';
+require_once __DIR__ . '/stubs.php';
 
 if (!class_exists('Validate')) {
     class Validate

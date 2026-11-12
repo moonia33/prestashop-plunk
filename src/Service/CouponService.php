@@ -185,7 +185,7 @@ final class CouponService
              FROM `' . _DB_PREFIX_ . 'plunk_coupon`
              WHERE `email` = \'' . pSQL($email) . '\'
                AND `rule` = \'' . pSQL($rule) . '\'
-               AND `date_exp` > NOW()
+               AND `date_exp` > \'' . pSQL(date('Y-m-d H:i:s')) . '\'
              ORDER BY `date_exp` DESC
              LIMIT 1'
         );
@@ -199,7 +199,7 @@ final class CouponService
             'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'plunk_coupon`
              WHERE `email` = \'' . pSQL($email) . '\'
                AND `rule` = \'' . pSQL($rule) . '\'
-               AND `date_add` > DATE_SUB(NOW(), INTERVAL 30 DAY)'
+               AND `date_add` > \'' . pSQL(date('Y-m-d H:i:s', time() - 30 * 86400)) . '\''
         );
     }
 
