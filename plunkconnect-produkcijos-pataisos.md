@@ -83,3 +83,13 @@ README aprašyk tą patį ir `flock` naudojimą.
  
          $map = [];
 ```
+
+## 6. Įvykių testas (2026-11-12, info@inultimo.lt)
+
+Veikia: `category.viewed` (10), `product.viewed` (8), `cart.updated` (4), `checkout.started` (1), visi `sent`, kontaktas su `locale`, `cartTotal`, `recentlyViewed`. `FEAT_SUBSCRIPTIONS` buvo išjungtas, todėl prenumeratos įvykio nebuvo. Taip ir turi būti.
+
+Pataisyti:
+- `categoryPath` turi „Šakninis“ ir „Pagrindinis“. Išmesk `PS_ROOT_CATEGORY` ir `PS_HOME_CATEGORY`, kaip `CatalogMapper`.
+- Produkto įvykiuose `id` yra int, o `productId` – string. Palik `productId` kaip pagrindinį lauką. Kai pasirinkta kombinacija (`combinationId > 0`), `productId` turi būti `"<id_product>-<id_product_attribute>"`, kaip kataloge. Patikrink `cart.items` ir `order.items` su variantine preke.
+- `recentlyViewed` siųsk kaip string ID masyvą (`["1602178", …]`), kad sutaptų su katalogu.
+- Wrapper `{value, persistent:false}` palik. Plunk jį dabar išvynioja pats: šablonuose rašoma `event.cart.items`, ne `event.cart.value.items`.
