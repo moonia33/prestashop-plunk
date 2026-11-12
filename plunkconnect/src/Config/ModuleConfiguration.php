@@ -24,6 +24,7 @@ class ModuleConfiguration
     public const WEBHOOK_SECRET = 'PLUNKCONNECT_WEBHOOK_SECRET';
     public const CRON_TOKEN = 'PLUNKCONNECT_CRON_TOKEN';
     public const FEED_TOKEN = 'PLUNKCONNECT_FEED_TOKEN';
+    public const COUPON_SECRET = 'PLUNKCONNECT_COUPON_SECRET';
     public const LOCALE_MAP = 'PLUNKCONNECT_LOCALE_MAP';
     public const LOCALE_FALLBACK = 'PLUNKCONNECT_LOCALE_FALLBACK';
     public const ORDERSTATE_MAP = 'PLUNKCONNECT_ORDERSTATE_MAP';
@@ -48,6 +49,7 @@ class ModuleConfiguration
         self::WEBHOOK_SECRET,
         self::CRON_TOKEN,
         self::FEED_TOKEN,
+        self::COUPON_SECRET,
     ];
 
     /**
@@ -150,7 +152,7 @@ class ModuleConfiguration
      */
     public function generateMissingTokens(?int $idShop = null, ?int $idShopGroup = null): void
     {
-        foreach ([self::WEBHOOK_SECRET, self::CRON_TOKEN, self::FEED_TOKEN] as $key) {
+        foreach ([self::WEBHOOK_SECRET, self::CRON_TOKEN, self::FEED_TOKEN, self::COUPON_SECRET] as $key) {
             if ('' === $this->get($key, $idShop, $idShopGroup)) {
                 $this->set($key, $this->randomToken(32), $idShop, $idShopGroup);
             }
@@ -159,7 +161,7 @@ class ModuleConfiguration
 
     public function regenerateToken(string $key, ?int $idShop = null, ?int $idShopGroup = null): bool
     {
-        if (!in_array($key, [self::WEBHOOK_SECRET, self::CRON_TOKEN, self::FEED_TOKEN], true)) {
+        if (!in_array($key, [self::WEBHOOK_SECRET, self::CRON_TOKEN, self::FEED_TOKEN, self::COUPON_SECRET], true)) {
             return false;
         }
 

@@ -51,7 +51,7 @@ class Plunkconnect extends Module
     public function __construct()
     {
         $this->name = 'plunkconnect';
-        $this->tab = 'emailing';
+        $this->tab = 'advertising_marketing';
         $this->version = '1.0.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
@@ -750,6 +750,7 @@ class Plunkconnect extends Module
             ModuleConfiguration::WEBHOOK_SECRET => $this->trans('Webhook secret (Bearer for the inbound webhook)', [], 'Modules.Plunkconnect.Admin'),
             ModuleConfiguration::CRON_TOKEN => $this->trans('Cron token (for the cron front controller)', [], 'Modules.Plunkconnect.Admin'),
             ModuleConfiguration::FEED_TOKEN => $this->trans('Feed token (stage 3 feeds)', [], 'Modules.Plunkconnect.Admin'),
+            ModuleConfiguration::COUPON_SECRET => $this->trans('Coupon secret (Bearer for the coupon endpoint, stage 4)', [], 'Modules.Plunkconnect.Admin'),
         ] as $key => $label) {
             $html .= '<tr><td>' . $label . '</td><td><code>' . htmlspecialchars($config->get($key, $idShop)) . '</code></td>'
                 . '<td><form method="post" style="display:inline"><input type="hidden" name="token_key" value="' . $key . '">'

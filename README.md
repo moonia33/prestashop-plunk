@@ -67,7 +67,7 @@ Modulis priima visas formas: `{"contact":{"email","subscribed"}}` (Plunk default
 
 > **Kodėl Bearer, o ne HMAC?** Patikrinta `useplunk/plunk@next` (`WorkflowExecutionService::executeWebhook`): WEBHOOK žingsnio antraštės renderinamos kaip statiniai `{{var}}` šablonai – HMAC parašo jis suskaičiuoti negali. Modulis vis tiek priima ir HMAC variantą (`X-Plunk-Timestamp` + `X-Plunk-Signature = hex(HMAC_SHA256(secret, ts+"."+body))`, ±300 s), jei siuntėjas mokėtų jį formuoti.
 
-> **Kuponams (4 etapas):** WEBHOOK žingsnio HTTP atsakymas saugomas į step output, bet **nepasiekiamas** vėlesnio `SEND_EMAIL` šablono – todėl kupono kodą modulis įrašys į kontaktą (`data.lastCouponCode`) per `POST /contacts`.
+> **Kuponams (4 etapas, nauja spec):** numatyti du būdai. **A.** Kupono taisyklės admin'e – modulis pats sukuria `CartRule` ir ideda kaip non-persistent `coupon {code, validUntil, value, type}` į įvykį (pvz. `order.delivered`). **B.** `POST /module/plunkconnect/coupon` su `Authorization: Bearer <coupon secret>` (atskiras tokenas, Plunk WEBHOOK žingsnio `saveResponseAs` grąžina `{"code", "validUntil", "value", "type", "minAmount"}` tolesniems šablonams). Parametrai imami iš modulio taisyklės `rule`, ne iš užklausos. Kuponai: unikalus kodas (prefiksas + 8 simboliai be `0/O/1/I`), `quantity=1`, `quantity_per_user=1`, `id_customer` registruotiems; saugomi `PREFIX_plunk_coupon`, nepanaudoti trinami `plunkconnect:coupons:cleanup`.
 
 ## Įvykiai (1 etapas)
 

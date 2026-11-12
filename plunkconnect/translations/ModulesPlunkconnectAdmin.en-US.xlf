@@ -242,6 +242,10 @@
         <source>Regenerate</source>
         <target>Regenerate</target>
       </trans-unit>
+      <trans-unit id="5c0c50b397f1e7e073507c7bdde08188">
+        <source>Coupon secret (Bearer for the coupon endpoint, stage 4)</source>
+        <target>Coupon secret (Bearer for the coupon endpoint, stage 4)</target>
+      </trans-unit>
     </body>
   </file>
 </xliff>
