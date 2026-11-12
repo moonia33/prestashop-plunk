@@ -1,52 +1,51 @@
 <?php
 
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
+ * Plunk Connect - connects PrestaShop to a self-hosted Plunk instance.
+ * Replaces Newsman (newsmanapp / newsmancoupons).
  *
- * Replaces the Newsman integration: newsletter subscription sync
- * (double opt-in via Plunk workflows, inbound webhook, GDPR), with an
- * asynchronous outbox so Plunk outages can never slow down the shop.
- *
- * @author  TV Parkas
- * @license MIT
+ * Compatible: PrestaShop 8.1 - 9.x, PHP >= 8.1, multistore.
+ * No HTTP call is ever made in a shopper request: everything goes through
+ * the outbox table and a cron worker.
  */
-
-declare(strict_types=1);
-
 if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-// The module has no external runtime dependencies; prefer composer autoload
-// when present, fall back to a tiny PSR-4 loader for PlunkConnect\* classes.
-if (file_exists(__DIR__ . '/vendor/autoload.php')) {
-    require_once __DIR__ . '/vendor/autoload.php';
-} else {
-    spl_autoload_register(static function (string $class): void {
-        $prefix = 'PlunkConnect\\';
-        if (0 === strncmp($class, $prefix, strlen($prefix))) {
-            $file = __DIR__ . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-            if (file_exists($file)) {
-                require_once $file;
-            }
-        }
-    });
-}
+require_once __DIR__ . '/autoload.php';
 
-use PlunkConnect\Config\LocaleMapper;
-use PlunkConnect\Config\ModuleConfiguration;
-use PlunkConnect\Gdpr\GdprService;
-use PlunkConnect\Newsletter\NewsletterSyncService;
+use PlunkConnect\Api\PlunkClient;
+use PlunkConnect\Config;
+use PlunkConnect\Mapper\LocaleMapper;
+use PlunkConnect\Outbox\Outbox;
 use PlunkConnect\Outbox\OutboxProcessor;
-use PlunkConnect\Outbox\OutboxRepository;
+use PlunkConnect\Service\GdprService;
+use PlunkConnect\Service\SubscriptionService;
+use PlunkConnect\Service\TrackingService;
 
 class Plunkconnect extends Module
 {
-    /** @var array<int, int> Previous customer.newsletter values captured in actionObjectCustomerUpdateBefore. */
-    private static $previousNewsletterFlags = [];
+    private const HOOKS = [
+        'moduleRoutes',
+        'actionNewsletterRegistrationAfter',
+        'actionCustomerAccountAdd',
+        'actionObjectCustomerUpdateBefore',
+        'actionObjectCustomerUpdateAfter',
+        'actionCartSave',
+        'actionObjectCartUpdateAfter',
+        'actionValidateOrder',
+        'actionOrderStatusPostUpdate',
+        'actionFrontControllerSetMedia',
+        'actionUpdateQuantity',
+        'actionObjectStockAvailableUpdateAfter',
+        'actionDeleteGDPRCustomer',
+        'actionExportGDPRData',
+        'actionCronJob',
+        'cronJob',
+    ];
 
-    /** @var ModuleConfiguration|null */
-    private $configuration;
+    /** @var bool|int remembers the newsletter flag before a customer update */
+    private $customerNewsletterBefore = false;
 
     public function __construct()
     {
@@ -56,785 +55,627 @@ class Plunkconnect extends Module
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
-        $this->ps_versions_compliancy = ['min' => '8.1.0', 'max' => '9.99.99'];
-        $this->display = 'full';
 
         parent::__construct();
 
-        $this->displayName = $this->trans('Plunk Connect', [], 'Modules.Plunkconnect.Admin');
-        $this->description = $this->trans(
-            'Syncs the shop with a self-hosted Plunk instance: newsletter subscriptions (double opt-in), inbound webhook, GDPR. All API calls go through a queued outbox.',
-            [],
-            'Modules.Plunkconnect.Admin'
+        $this->displayName = $this->l('Plunk Connect');
+        $this->description = $this->l(
+            'Connects this shop to a self-hosted Plunk instance: newsletter sync (double opt-in), '
+            . 'behavioural events, catalog feed and coupons.'
         );
-        $this->confirmUninstall = $this->trans('Are you sure? Queued messages and module configuration will be deleted.', [], 'Modules.Plunkconnect.Admin');
+        $this->confirmUninstall = $this->l('All queued Plunk events will be lost. Plunk-side data is not touched.');
+        $this->ps_versions_compliancy = ['min' => '8.1.0', 'max' => '9.99.99'];
     }
-
-    public function getConfiguration(): ModuleConfiguration
-    {
-        if (null === $this->configuration) {
-            $this->configuration = new ModuleConfiguration();
-        }
-
-        return $this->configuration;
-    }
-
-    public function getOutboxProcessor(): OutboxProcessor
-    {
-        return new OutboxProcessor($this->getConfiguration(), null, null, static function (string $level, string $message): void {
-            PrestaShopLogger::addLog($message, 'error' === $level ? 3 : 1, null, 'PlunkConnect', null, true);
-        });
-    }
-
-    public function getSyncService(): NewsletterSyncService
-    {
-        return new NewsletterSyncService($this->getConfiguration());
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Install / uninstall */
-    /* ------------------------------------------------------------------ */
 
     public function install(): bool
     {
-        if (!parent::install()) {
-            return false;
-        }
-
-        if (!$this->installDb()) {
-            return false;
-        }
-
-        $hooks = [
-            'actionNewsletterRegistrationBefore',
-            'actionNewsletterRegistrationAfter',
-            'actionCustomerAccountAdd',
-            'actionObjectCustomerUpdateBefore',
-            'actionObjectCustomerUpdateAfter',
-            'actionDeleteGDPRCustomer',
-            'actionExportGDPRData',
-            'actionCronJob',
-        ];
-
-        if (!$this->registerHook($hooks)) {
-            return false;
-        }
-
-        $config = $this->getConfiguration();
-        $defaults = [
-            ModuleConfiguration::FEAT_NEWSLETTER => '0',
-            ModuleConfiguration::FEAT_DOUBLE_OPTIN => '1',
-            ModuleConfiguration::FEAT_TRACKING => '0',
-            ModuleConfiguration::FEAT_CART => '0',
-            ModuleConfiguration::FEAT_ORDERS => '0',
-            ModuleConfiguration::FEAT_FEED => '0',
-            ModuleConfiguration::FEAT_COUPONS => '0',
-            ModuleConfiguration::FEAT_BACKINSTOCK => '0',
-            ModuleConfiguration::LOCALE_FALLBACK => 'lt',
-            ModuleConfiguration::CONSENT_SOURCE => 'website_signup',
-        ];
-        foreach ($defaults as $key => $value) {
-            if ('' === $config->get($key)) {
-                $config->set($key, $value);
-            }
-        }
-        $config->generateMissingTokens();
-
-        return true;
+        return parent::install()
+            && $this->registerHook(self::HOOKS)
+            && $this->runSql('install')
+            && $this->installDefaults();
     }
 
     public function uninstall(): bool
     {
-        if (!$this->uninstallDb()) {
-            return false;
+        foreach (Config::ALL_KEYS as $key) {
+            Configuration::deleteByName($key);
         }
 
-        // Remove every PLUNKCONNECT_* configuration value (all shops).
-        Db::getInstance()->execute(
-            'DELETE FROM `' . _DB_PREFIX_ . 'configuration`
-            WHERE `name` LIKE \'PLUNKCONNECT\\_%\''
-        );
-
-        return parent::uninstall();
+        return $this->runSql('uninstall') && parent::uninstall();
     }
 
-    private function installDb(): bool
+    private function runSql(string $file): bool
     {
-        $sql = include __DIR__ . '/sql/install.php';
-        foreach ($sql as $query) {
-            $query = str_replace(['_DB_PREFIX_', '_MYSQL_ENGINE_'], [_DB_PREFIX_, _MYSQL_ENGINE_], $query);
-            if (!Db::getInstance()->execute($query)) {
-                return false;
-            }
+        $path = __DIR__ . '/sql/' . $file . '.php';
+        if (!file_exists($path)) {
+            return true;
         }
+
+        return (bool) require $path;
+    }
+
+    private function installDefaults(): bool
+    {
+        Config::set(Config::WEBHOOK_SECRET, Config::generateSecret(32));
+        Config::set(Config::FEED_TOKEN, Config::generateSecret(24));
+        Config::set(Config::CRON_TOKEN, Config::generateSecret(24));
+        Config::set(Config::COUPON_SECRET, Config::generateSecret(32));
+        Config::set(Config::COUPON_RULES, '{}');
+        Config::set(Config::LOCALE_FALLBACK, LocaleMapper::DEFAULT_FALLBACK);
+        Config::set(Config::FEAT_SUBSCRIPTIONS, 1);
+        Config::set(Config::FEAT_DOUBLE_OPTIN, 1);
+        Config::set(Config::CONSENT_SOURCE, 'website_signup');
+        Config::set(Config::DB_VERSION, $this->version);
 
         return true;
     }
 
-    private function uninstallDb(): bool
-    {
-        $sql = include __DIR__ . '/sql/uninstall.php';
-        foreach ($sql as $query) {
-            $query = str_replace('_DB_PREFIX_', _DB_PREFIX_, $query);
-            if (!Db::getInstance()->execute($query)) {
-                return false;
-            }
-        }
+    // ------------------------------------------------------------------
+    // Hooks: friendly routes
+    // ------------------------------------------------------------------
 
-        return true;
+    public function hookModuleRoutes(): array
+    {
+        return [
+            'plunkconnect-webhook' => [
+                'rule' => 'webhook',
+                'controller' => 'webhook',
+                'keywords' => [],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+            'plunkconnect-cron' => [
+                'rule' => 'cron',
+                'controller' => 'cron',
+                'keywords' => [],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+            'plunkconnect-feed' => [
+                'rule' => 'feed/{type}',
+                'controller' => 'feed',
+                'keywords' => [
+                    'type' => ['regexp' => 'products|categories', 'param' => 'type'],
+                ],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+            'plunkconnect-products' => [
+                'rule' => 'products',
+                'controller' => 'products',
+                'keywords' => [],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+            'plunkconnect-recommendations' => [
+                'rule' => 'recommendations',
+                'controller' => 'recommendations',
+                'keywords' => [],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+            'plunkconnect-coupon' => [
+                'rule' => 'coupon',
+                'controller' => 'coupon',
+                'keywords' => [],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+            'plunkconnect-restorecart' => [
+                'rule' => 'restorecart',
+                'controller' => 'restorecart',
+                'keywords' => [],
+                'params' => ['fc' => 'module', 'module' => $this->name],
+            ],
+        ];
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Hooks – newsletter (stage 1) */
-    /* ------------------------------------------------------------------ */
+    // ------------------------------------------------------------------
+    // Hooks: subscriptions
+    // ------------------------------------------------------------------
 
-    /**
-     * Fires for BOTH subscribe and unsubscribe attempts of the guest form.
-     * The "After" hook only runs on subscribe, so an unsubscribe intent is
-     * captured here and verified in a shutdown function (after the row has
-     * actually been deleted by ps_emailsubscription).
-     *
-     * @param array<string, mixed> $params
-     */
-    public function hookActionNewsletterRegistrationBefore(array $params): void
-    {
-        try {
-            if (!isset($params['action']) || 1 !== (int) $params['action']) { // NEWSLETTER_UNSUBSCRIPTION
-                return;
-            }
-            $email = isset($params['email']) ? trim((string) $params['email']) : '';
-            if (!Validate::isEmail($email)) {
-                return;
-            }
-
-            $idShop = (int) $this->context->shop->id;
-
-            // Only act if the email is currently subscribed in this shop.
-            $exists = (int) Db::getInstance()->getValue(
-                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
-                WHERE `email` = \'' . pSQL($email) . '\' AND `id_shop` = ' . $idShop . ' AND `active` = 1'
-            ) + (int) Db::getInstance()->getValue(
-                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
-                WHERE `email` = \'' . pSQL($email) . '\' AND `id_shop` = ' . $idShop . ' AND `newsletter` = 1'
-            );
-
-            if (0 === $exists) {
-                return;
-            }
-
-            $module = $this;
-            register_shutdown_function(static function () use ($module, $email, $idShop): void {
-                try {
-                    $stillSubscribed = (int) Db::getInstance()->getValue(
-                        'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
-                        WHERE `email` = \'' . pSQL($email) . '\' AND `id_shop` = ' . (int) $idShop
-                    ) + (int) Db::getInstance()->getValue(
-                        'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
-                        WHERE `email` = \'' . pSQL($email) . '\' AND `id_shop` = ' . (int) $idShop . ' AND `newsletter` = 1'
-                    );
-
-                    if (0 === $stillSubscribed) {
-                        $module->getSyncService()->unsubscribed($email, $idShop);
-                    }
-                } catch (Throwable $e) {
-                    PrestaShopLogger::addLog('PlunkConnect: guest unsubscribe check failed: ' . $e->getMessage(), 3, null, 'PlunkConnect', null, true);
-                }
-            });
-        } catch (Throwable $e) {
-            $this->logError('hookActionNewsletterRegistrationBefore', $e);
-        }
-    }
-
-    /**
-     * Fires after a successful guest subscription (and after verification
-     * email confirmation). Does not fire for unsubscribes.
-     *
-     * @param array<string, mixed> $params
-     */
     public function hookActionNewsletterRegistrationAfter(array $params): void
     {
-        try {
-            if (!isset($params['action']) || 0 !== (int) $params['action']) { // NEWSLETTER_SUBSCRIPTION
-                return;
-            }
-            if (!empty($params['error'])) {
-                return;
-            }
-            $email = isset($params['email']) ? trim((string) $params['email']) : '';
-            if (!Validate::isEmail($email)) {
-                return;
-            }
-
-            $idShop = (int) $this->context->shop->id;
-            $guestRow = Db::getInstance()->getRow(
-                'SELECT `id_lang`, `ip_registration_newsletter`, `http_referer`
-                FROM `' . _DB_PREFIX_ . 'emailsubscription`
-                WHERE `email` = \'' . pSQL($email) . '\' AND `id_shop` = ' . $idShop
-            );
-
-            $idLang = $guestRow ? (int) $guestRow['id_lang'] : (int) $this->context->language->id;
-            $this->getSyncService()->guestSubscribed($email, $idShop, $idLang, $this->langIso($idLang), $guestRow ?: null);
-        } catch (Throwable $e) {
-            $this->logError('hookActionNewsletterRegistrationAfter', $e);
+        $email = strtolower(trim((string) ($params['email'] ?? '')));
+        if (!Validate::isEmail($email)) {
+            return;
         }
+        $action = (string) ($params['action'] ?? '');
+        if ('unsubscribed' === $action || 'delete' === $action) {
+            SubscriptionService::unsubscribe($email);
+
+            return;
+        }
+        SubscriptionService::signup($email);
+        TrackingService::flushAnonymousViews($email, (int) $this->context->language->id);
     }
 
-    /**
-     * Account creation. Sends a subscribe event when the newsletter box was
-     * checked during registration.
-     *
-     * @param array<string, mixed> $params
-     */
     public function hookActionCustomerAccountAdd(array $params): void
     {
-        try {
-            $customer = $params['newCustomer'] ?? null;
-            if (!$customer instanceof Customer || !(int) $customer->newsletter) {
-                return;
-            }
-
-            $idShop = (int) ($customer->id_shop ?: $this->context->shop->id);
-            $this->getSyncService()->customerSubscribed($customer, $idShop);
-        } catch (Throwable $e) {
-            $this->logError('hookActionCustomerAccountAdd', $e);
+        $customer = $params['newCustomer'] ?? $params['customer'] ?? null;
+        if (!$customer instanceof Customer || !Validate::isEmail($customer->email)) {
+            return;
+        }
+        TrackingService::customerRegistered($customer);
+        if (!empty($customer->newsletter)) {
+            SubscriptionService::signup(strtolower($customer->email), [], $customer);
         }
     }
 
-    /**
-     * Captures the newsletter flag before a Customer update so the After
-     * hook can detect a 0/1 flip.
-     *
-     * @param array<string, mixed> $params
-     */
     public function hookActionObjectCustomerUpdateBefore(array $params): void
     {
-        try {
-            $customer = $params['object'] ?? null;
-            if (!$customer instanceof Customer || !(int) $customer->id) {
-                return;
-            }
-
-            self::$previousNewsletterFlags[(int) $customer->id] = (int) Db::getInstance()->getValue(
-                'SELECT `newsletter` FROM `' . _DB_PREFIX_ . 'customer`
-                WHERE `id_customer` = ' . (int) $customer->id
-            );
-        } catch (Throwable $e) {
-            $this->logError('hookActionObjectCustomerUpdateBefore', $e);
+        $customer = $params['object'] ?? null;
+        if ($customer instanceof Customer && $customer->id) {
+            $existing = new Customer((int) $customer->id);
+            $this->customerNewsletterBefore = Validate::isLoadedObject($existing)
+                ? (int) $existing->newsletter
+                : (int) $customer->newsletter;
         }
     }
 
-    /**
-     * @param array<string, mixed> $params
-     */
     public function hookActionObjectCustomerUpdateAfter(array $params): void
     {
-        try {
-            $customer = $params['object'] ?? null;
-            if (!$customer instanceof Customer || !(int) $customer->id) {
-                return;
-            }
-
-            $idCustomer = (int) $customer->id;
-            if (!array_key_exists($idCustomer, self::$previousNewsletterFlags)) {
-                return;
-            }
-
-            $before = self::$previousNewsletterFlags[$idCustomer];
-            unset(self::$previousNewsletterFlags[$idCustomer]);
-            $after = (int) $customer->newsletter;
-
-            if ($before === $after) {
-                return;
-            }
-
-            $idShop = (int) ($customer->id_shop ?: $this->context->shop->id);
-            $sync = $this->getSyncService();
-
-            if (1 === $after) {
-                $sync->customerSubscribed($customer, $idShop);
-            } else {
-                $sync->unsubscribed((string) $customer->email, $idShop, (int) $customer->id_lang, $this->langIso((int) $customer->id_lang));
-            }
-        } catch (Throwable $e) {
-            $this->logError('hookActionObjectCustomerUpdateAfter', $e);
+        $customer = $params['object'] ?? null;
+        if (!$customer instanceof Customer || !Validate::isEmail($customer->email)) {
+            return;
+        }
+        $now = (int) $customer->newsletter;
+        if ($this->customerNewsletterBefore === $now) {
+            return;
+        }
+        $email = strtolower((string) $customer->email);
+        if (1 === $now) {
+            SubscriptionService::signup($email, [], $customer);
+            TrackingService::flushAnonymousViews($email, (int) $customer->id_lang);
+        } else {
+            SubscriptionService::unsubscribe($email, (int) $customer->id_lang);
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Hooks – GDPR (psgdpr) */
-    /* ------------------------------------------------------------------ */
+    // ------------------------------------------------------------------
+    // Hooks: behavioural events
+    // ------------------------------------------------------------------
 
-    /**
-     * @param array<string, mixed> $params
-     */
+    public function hookActionFrontControllerSetMedia(array $params): void
+    {
+        try {
+            TrackingService::onFrontControllerSetMedia();
+        } catch (Throwable $e) {
+            // Tracking must never break a page.
+        }
+    }
+
+    public function hookActionCartSave(array $params): void
+    {
+        $cart = $params['cart'] ?? $this->context->cart;
+        if ($cart instanceof Cart) {
+            TrackingService::cartUpdated($cart);
+        }
+    }
+
+    public function hookActionObjectCartUpdateAfter(array $params): void
+    {
+        $cart = $params['object'] ?? null;
+        if ($cart instanceof Cart) {
+            TrackingService::cartUpdated($cart);
+        }
+    }
+
+    public function hookActionValidateOrder(array $params): void
+    {
+        try {
+            TrackingService::orderPlaced($params);
+        } catch (Throwable $e) {
+            // Never block checkout.
+        }
+    }
+
+    public function hookActionOrderStatusPostUpdate(array $params): void
+    {
+        try {
+            TrackingService::orderStatusUpdated($params);
+        } catch (Throwable $e) {
+            // Never block BO actions.
+        }
+    }
+
+    public function hookActionUpdateQuantity(array $params): void
+    {
+        $idProduct = (int) ($params['id_product'] ?? 0);
+        $idAttr = (int) ($params['id_product_attribute'] ?? 0);
+        $qty = (int) ($params['quantity'] ?? -1);
+        if ($idProduct > 0 && $qty > 0) {
+            TrackingService::backInStock($idProduct, $idAttr, $qty);
+        }
+    }
+
+    public function hookActionObjectStockAvailableUpdateAfter(array $params): void
+    {
+        $stock = $params['object'] ?? null;
+        if ($stock instanceof StockAvailable && (int) $stock->quantity > 0) {
+            TrackingService::backInStock((int) $stock->id_product, (int) $stock->id_product_attribute, (int) $stock->quantity);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Hooks: GDPR + cron
+    // ------------------------------------------------------------------
+
     public function hookActionDeleteGDPRCustomer(array $params): void
     {
-        try {
-            $customer = isset($params['customer']) ? (array) $params['customer'] : $params;
-            (new GdprService($this->getConfiguration(), $this->getSyncService()))
-                ->onDeleteCustomer($customer, (int) $this->context->shop->id);
-        } catch (Throwable $e) {
-            $this->logError('hookActionDeleteGDPRCustomer', $e);
+        $email = (string) ($params['email'] ?? '');
+        if ('' === $email && isset($params['customer'])) {
+            $customer = $params['customer'];
+            $email = is_array($customer) ? (string) ($customer['email'] ?? '') : (string) ($customer->email ?? '');
         }
+        GdprService::deleteCustomer(strtolower(trim($email)));
     }
 
-    /**
-     * @param array<string, mixed> $params
-     *
-     * @return string JSON consumed by psgdpr
-     */
-    public function hookActionExportGDPRData(array $params)
+    public function hookActionExportGDPRData(array $params): array
     {
-        try {
-            $customer = isset($params['customer']) ? (array) $params['customer'] : $params;
+        $email = (string) ($params['email'] ?? '');
 
-            return (new GdprService($this->getConfiguration()))->onExportData($customer);
-        } catch (Throwable $e) {
-            $this->logError('hookActionExportGDPRData', $e);
-
-            return '{}';
-        }
+        return GdprService::exportData(strtolower(trim($email)));
     }
 
-    /**
-     * Fallback scheduler for the ps cronjobs module: drains a small batch.
-     *
-     * @param array<string, mixed> $params
-     */
     public function hookActionCronJob(array $params): void
     {
-        try {
-            $this->getOutboxProcessor()->process(50, 30);
-        } catch (Throwable $e) {
-            $this->logError('hookActionCronJob', $e);
+        // cronjobs module passes its job definition; run when the job
+        // targets this module or when no target is given.
+        $module = (string) ($params['module'] ?? '');
+        if ('' !== $module && $module !== $this->name) {
+            return;
         }
+        $processor = new OutboxProcessor();
+        $processor->process(100, 20);
+        $processor->cleanup(1);
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Admin configuration */
-    /* ------------------------------------------------------------------ */
+    /**
+     * Legacy hook name used by the cronjobs module - same behaviour.
+     */
+    public function hookCronJob(array $params = []): void
+    {
+        $this->hookActionCronJob($params);
+    }
+
+    // ------------------------------------------------------------------
+    // Admin configuration
+    // ------------------------------------------------------------------
 
     public function getContent(): string
     {
         $output = '';
-        $config = $this->getConfiguration();
-        $idShop = (int) $this->context->shop->id;
-        $idShopGroup = (int) $this->context->shop->id_shop_group;
 
-        if (Tools::isSubmit('plunkconnectRegenToken')) {
+        if (Tools::isSubmit('testPlunkConnection')) {
+            $ping = (new PlunkClient())->ping();
+            $output .= $ping['ok']
+                ? $this->displayConfirmation($this->l('Connection OK:') . ' ' . $ping['message'])
+                : $this->displayError($this->l('Connection failed:') . ' ' . $ping['message']);
+        }
+        if (Tools::isSubmit('regenPlunkToken')) {
             $key = (string) Tools::getValue('token_key');
-            if ($config->regenerateToken($key, $idShop, $idShopGroup)) {
-                $output .= $this->displayConfirmation($this->trans('Token regenerated.', [], 'Modules.Plunkconnect.Admin'));
+            if (in_array($key, [Config::WEBHOOK_SECRET, Config::FEED_TOKEN, Config::CRON_TOKEN, Config::COUPON_SECRET], true)) {
+                Config::set($key, Config::generateSecret(32));
+                $output .= $this->displayConfirmation($this->l('Token regenerated.'));
             }
         }
-
-        if (Tools::isSubmit('plunkconnectRetryDead')) {
-            $count = (new OutboxRepository())->retryDead($idShop);
-            $output .= $this->displayConfirmation($this->trans('%d dead message(s) re-queued.', [$count], 'Modules.Plunkconnect.Admin'));
+        if (Tools::isSubmit('plunkRetryDead')) {
+            $n = Outbox::retryDead();
+            $output .= $this->displayConfirmation(sprintf($this->l('%d dead rows requeued.'), $n));
+        }
+        if (Tools::isSubmit('plunkProcessNow')) {
+            $stats = (new OutboxProcessor())->process(50, 20);
+            $output .= $this->displayConfirmation(sprintf(
+                $this->l('Outbox run: %d sent, %d retried, %d dead.'),
+                $stats['sent'],
+                $stats['retried'],
+                $stats['dead']
+            ));
+        }
+        if (Tools::isSubmit('submitPlunkConfig')) {
+            $output .= $this->saveConfig();
         }
 
-        if (Tools::isSubmit('plunkconnectTestConnection')) {
-            $output .= $this->runConnectionTest($idShop);
-        }
-
-        if (Tools::isSubmit('submitPlunkconnectSettings')) {
-            $errors = $this->saveSettings($idShop, $idShopGroup);
-            $output .= empty($errors)
-                ? $this->displayConfirmation($this->trans('Settings saved.', [], 'Modules.Plunkconnect.Admin'))
-                : $this->displayError(implode('<br>', $errors));
-        }
-
-        return $output . $this->renderStatusBlock($idShop) . $this->renderSettingsForm($idShop);
+        return $output . $this->renderStatusPanel() . $this->renderForm();
     }
 
-    /**
-     * @return string[] validation errors (empty on success)
-     */
-    private function saveSettings(int $idShop, int $idShopGroup): array
+    private function saveConfig(): string
     {
-        $config = $this->getConfiguration();
-        $errors = [];
-
-        $apiUrl = trim((string) Tools::getValue(ModuleConfiguration::API_URL));
-        if ('' !== $apiUrl && !Validate::isAbsoluteUrl($apiUrl)) {
-            $errors[] = $this->trans('API URL must be an absolute https:// URL.', [], 'Modules.Plunkconnect.Admin');
+        foreach ([Config::API_URL, Config::CONSENT_SOURCE, Config::SHOP_CODE,
+            Config::CONSENT_COOKIE, Config::CONSENT_COOKIE_VALUE] as $key) {
+            Config::set($key, trim((string) Tools::getValue($key)));
         }
-        if ('' !== $apiUrl && 0 !== strpos($apiUrl, 'https://')) {
-            $errors[] = $this->trans('API URL must use https://.', [], 'Modules.Plunkconnect.Admin');
-        }
-
-        $publicKey = trim((string) Tools::getValue(ModuleConfiguration::PUBLIC_KEY));
-        $secretKey = trim((string) Tools::getValue(ModuleConfiguration::SECRET_KEY));
-        foreach ([[ModuleConfiguration::PUBLIC_KEY, $publicKey, 'pk_'], [ModuleConfiguration::SECRET_KEY, $secretKey, 'sk_']] as $tuple) {
-            if ('' !== $tuple[1] && !preg_match('/^' . $tuple[2] . '[A-Za-z0-9_\-]+$/', $tuple[1])) {
-                $errors[] = $this->trans('%s must start with %s.', [$tuple[0], $tuple[2]], 'Modules.Plunkconnect.Admin');
-            }
-        }
-
-        $fallback = strtolower(trim((string) Tools::getValue(ModuleConfiguration::LOCALE_FALLBACK)));
-        if ('ru' === $fallback || !LocaleMapper::isAllowedLocale($fallback)) {
-            $errors[] = $this->trans('Fallback locale is not allowed.', [], 'Modules.Plunkconnect.Admin');
-        }
-
-        $localeMap = [];
-        foreach (Language::getLanguages(false, $idShop) as $lang) {
-            $value = strtolower(trim((string) Tools::getValue('PLUNKCONNECT_LOCALE_' . (int) $lang['id_lang'])));
+        foreach ([Config::PUBLIC_KEY, Config::SECRET_KEY] as $key) {
+            $value = trim((string) Tools::getValue($key));
             if ('' !== $value) {
-                if ('ru' === $value || !LocaleMapper::isAllowedLocale($value)) {
-                    $errors[] = $this->trans('Locale for language #%d is not allowed.', [(int) $lang['id_lang']], 'Modules.Plunkconnect.Admin');
-                    continue;
-                }
-                $localeMap[(int) $lang['id_lang']] = $value;
+                Config::set($key, $value);
             }
         }
-
-        if (!empty($errors)) {
-            return $errors;
+        foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
+            Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
+            Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE] as $key) {
+            Config::set($key, (int) (bool) Tools::getValue($key));
         }
 
-        $config->set(ModuleConfiguration::API_URL, rtrim($apiUrl, '/'), $idShop, $idShopGroup);
-        // Keys are only overwritten when the admin typed a new value —
-        // the fields render empty (masked value shown as a note) so an
-        // ordinary "Save" never blanks them.
-        if ('' !== $publicKey) {
-            $config->set(ModuleConfiguration::PUBLIC_KEY, $publicKey, $idShop, $idShopGroup);
+        // Locale map: only allowed locales may be targets (never `ru`).
+        $localeMap = [];
+        foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {
+            $chosen = strtolower((string) Tools::getValue('PLUNK_LOCALE_' . $idLang));
+            $localeMap[$idLang] = LocaleMapper::isAllowed($chosen) ? $chosen : $iso;
         }
-        if ('' !== $secretKey) {
-            $config->set(ModuleConfiguration::SECRET_KEY, $secretKey, $idShop, $idShopGroup);
-        }
-        $config->set(ModuleConfiguration::CONSENT_SOURCE, preg_replace('/[^A-Za-z0-9_\-]/', '', (string) Tools::getValue(ModuleConfiguration::CONSENT_SOURCE)) ?: 'website_signup', $idShop, $idShopGroup);
-        $config->set(ModuleConfiguration::SHOP_CODE, preg_replace('/[^A-Za-z0-9_\-]/', '', (string) Tools::getValue(ModuleConfiguration::SHOP_CODE)), $idShop, $idShopGroup);
-        $config->set(ModuleConfiguration::LOCALE_FALLBACK, $fallback, $idShop, $idShopGroup);
-        $config->set(ModuleConfiguration::LOCALE_MAP, json_encode($localeMap), $idShop, $idShopGroup);
-        $config->set(ModuleConfiguration::CONSENT_COOKIE_NAME, trim((string) Tools::getValue(ModuleConfiguration::CONSENT_COOKIE_NAME)), $idShop, $idShopGroup);
-        $config->set(ModuleConfiguration::CONSENT_COOKIE_VALUE, trim((string) Tools::getValue(ModuleConfiguration::CONSENT_COOKIE_VALUE)), $idShop, $idShopGroup);
+        Config::set(Config::LOCALE_MAP, json_encode($localeMap));
 
-        foreach ([
-            ModuleConfiguration::FEAT_NEWSLETTER,
-            ModuleConfiguration::FEAT_DOUBLE_OPTIN,
-            ModuleConfiguration::FEAT_TRACKING,
-            ModuleConfiguration::FEAT_CART,
-            ModuleConfiguration::FEAT_ORDERS,
-            ModuleConfiguration::FEAT_FEED,
-            ModuleConfiguration::FEAT_COUPONS,
-            ModuleConfiguration::FEAT_BACKINSTOCK,
-        ] as $flag) {
-            $config->set($flag, Tools::getValue($flag) ? '1' : '0', $idShop, $idShopGroup);
-        }
+        $fallback = strtolower((string) Tools::getValue(Config::LOCALE_FALLBACK));
+        Config::set(Config::LOCALE_FALLBACK, LocaleMapper::isAllowed($fallback) ? $fallback : LocaleMapper::DEFAULT_FALLBACK);
 
-        // Order state mapping (used from stage 2 onwards; stored already).
-        $orderMap = [];
-        foreach (['paid', 'shipped', 'delivered', 'cancelled', 'refunded'] as $state) {
-            $ids = array_filter(array_map('intval', (array) Tools::getValue('PLUNKCONNECT_OS_' . $state, [])));
-            if (!empty($ids)) {
-                $orderMap[$state] = array_values($ids);
-            }
+        // Order state map: multiselect values arrive as arrays.
+        $stateMap = [];
+        foreach (['paid', 'shipped', 'delivered', 'cancelled', 'refunded'] as $event) {
+            $selected = Tools::getValue('PLUNK_OS_' . $event);
+            $stateMap[$event] = is_array($selected) ? array_map('intval', $selected) : [];
         }
-        $config->set(ModuleConfiguration::ORDERSTATE_MAP, json_encode($orderMap), $idShop, $idShopGroup);
+        Config::set(Config::ORDERSTATE_MAP, json_encode($stateMap));
 
-        return [];
+        // Coupon rules JSON: only persist when it decodes to an object.
+        $rulesJson = trim((string) Tools::getValue(Config::COUPON_RULES));
+        $rules = '' === $rulesJson ? [] : json_decode($rulesJson, true);
+        if (!is_array($rules)) {
+            return $this->displayError($this->l('Invalid coupon rules JSON - other settings were saved.'));
+        }
+        Config::set(Config::COUPON_RULES, json_encode($rules));
+
+        return $this->displayConfirmation($this->l('Settings saved.'));
     }
 
-    private function runConnectionTest(int $idShop): string
+    private function renderStatusPanel(): string
     {
-        $config = $this->getConfiguration();
-        if (!$config->isConfigured($idShop)) {
-            return $this->displayError($this->trans('Configure API URL and keys first.', [], 'Modules.Plunkconnect.Admin'));
-        }
+        $counts = Outbox::counts();
+        $errors = Outbox::lastErrors(10);
+        $link = Context::getContext()->link;
+        $webhookUrl = $link->getModuleLink($this->name, 'webhook');
+        $feedUrl = $link->getModuleLink($this->name, 'feed', ['type' => 'products', 'lang' => 'lt']);
+        $cronUrl = $link->getModuleLink($this->name, 'cron') . '&token=' . urlencode((string) Config::get(Config::CRON_TOKEN));
 
-        $response = $config->createClient($idShop)->testConnection();
+        $html = '<div class="panel"><h3><i class="icon-heartbeat"></i> '
+            . $this->l('Outbox status') . '</h3><div class="row">'
+            . '<div class="col-lg-8"><table class="table"><tbody><tr>'
+            . '<td>' . $this->l('Pending') . '</td><td><b>' . $counts['pending'] . '</b></td>'
+            . '<td>' . $this->l('Processing') . '</td><td><b>' . $counts['processing'] . '</b></td>'
+            . '<td>' . $this->l('Sent') . '</td><td><b>' . $counts['sent'] . '</b></td>'
+            . '<td>' . $this->l('Failed queue') . '</td><td><b>' . $counts['failed'] . '</b></td>'
+            . '<td>' . $this->l('Dead') . '</td><td><b class="text-danger">' . $counts['dead'] . '</b></td>'
+            . '</tr></tbody></table></div>'
+            . '<div class="col-lg-4">'
+            . '<form method="post" style="display:inline"><button class="btn btn-default" name="plunkProcessNow" value="1">'
+            . $this->l('Process now') . '</button></form> '
+            . '<form method="post" style="display:inline"><button class="btn btn-default" name="plunkRetryDead" value="1">'
+            . $this->l('Retry dead') . '</button></form>'
+            . '</div></div>';
 
-        if ($response->isSuccess()) {
-            return $this->displayConfirmation($this->trans('Connection OK (HTTP %d).', [$response->statusCode], 'Modules.Plunkconnect.Admin'));
-        }
-
-        $detail = $response->transportError ?: ('HTTP ' . $response->statusCode);
-
-        return $this->displayError($this->trans('Connection failed: %s', [$detail], 'Modules.Plunkconnect.Admin'));
-    }
-
-    private function renderStatusBlock(int $idShop): string
-    {
-        $repo = new OutboxRepository();
-        $counts = $repo->countsByStatus($idShop);
-        $errors = $repo->lastErrors($idShop, 5);
-        $config = $this->getConfiguration();
-
-        $html = '<div class="panel"><h3><i class="icon-tasks"></i> ' . $this->trans('Outbox status', [], 'Modules.Plunkconnect.Admin') . '</h3>';
-        $html .= '<div class="row">';
-        foreach ([
-            'pending' => 'warning',
-            'processing' => 'info',
-            'sent' => 'success',
-            'failed' => 'danger',
-            'dead' => 'danger',
-        ] as $status => $color) {
-            $html .= '<div class="col-lg-2"><div class="well text-center"><strong class="text-' . $color . '" style="font-size:2em">'
-                . (int) $counts[$status] . '</strong><br>' . $status . '</div></div>';
-        }
-        $html .= '</div>';
-
-        $html .= '<form method="post" style="display:inline">';
-        $html .= '<button type="submit" name="plunkconnectRetryDead" class="btn btn-default">' . $this->trans('Re-queue dead messages', [], 'Modules.Plunkconnect.Admin') . '</button> ';
-        $html .= '<button type="submit" name="plunkconnectTestConnection" class="btn btn-default">' . $this->trans('Test connection', [], 'Modules.Plunkconnect.Admin') . '</button>';
-        $html .= '</form>';
-
-        if (!empty($errors)) {
-            $html .= '<h4>' . $this->trans('Recent errors', [], 'Modules.Plunkconnect.Admin') . '</h4><table class="table"><thead><tr><th>#</th><th>' . $this->trans('Endpoint', [], 'Modules.Plunkconnect.Admin') . '</th><th>' . $this->trans('Status', [], 'Modules.Plunkconnect.Admin') . '</th><th>' . $this->trans('Attempts', [], 'Modules.Plunkconnect.Admin') . '</th><th>' . $this->trans('Error', [], 'Modules.Plunkconnect.Admin') . '</th><th>' . $this->trans('Updated', [], 'Modules.Plunkconnect.Admin') . '</th></tr></thead><tbody>';
+        if ($errors) {
+            $html .= '<table class="table"><thead><tr><th>#</th><th>' . $this->l('Endpoint')
+                . '</th><th>' . $this->l('Attempts') . '</th><th>' . $this->l('Last error')
+                . '</th><th>' . $this->l('Updated') . '</th></tr></thead><tbody>';
             foreach ($errors as $row) {
-                $html .= '<tr><td>' . (int) $row['id_outbox'] . '</td><td>' . htmlspecialchars($row['endpoint']) . '</td><td>'
-                    . htmlspecialchars($row['status']) . '</td><td>' . (int) $row['attempts'] . '</td><td>'
-                    . htmlspecialchars($row['last_error']) . '</td><td>' . htmlspecialchars($row['date_upd']) . '</td></tr>';
+                $html .= '<tr><td>' . (int) $row['id_outbox'] . '</td>'
+                    . '<td>' . htmlspecialchars((string) $row['endpoint']) . '</td>'
+                    . '<td>' . (int) $row['attempts'] . '</td>'
+                    . '<td>' . htmlspecialchars((string) $row['last_error']) . '</td>'
+                    . '<td>' . htmlspecialchars((string) $row['date_upd']) . '</td></tr>';
             }
             $html .= '</tbody></table>';
         }
 
-        // Endpoint URLs this shop must configure in Plunk / crontab.
-        $baseUrl = $this->context->shop->getBaseURL(true);
-        $cronToken = $config->get(ModuleConfiguration::CRON_TOKEN, $idShop);
-        $html .= '<h4>' . $this->trans('Endpoints', [], 'Modules.Plunkconnect.Admin') . '</h4><table class="table">';
-        $html .= '<tr><td>Webhook (Plunk → PS)</td><td><code>' . htmlspecialchars($baseUrl . 'module/plunkconnect/webhook') . '</code></td></tr>';
-        $html .= '<tr><td>Cron (outbox worker)</td><td><code>' . htmlspecialchars($baseUrl . 'module/plunkconnect/cron?token=' . $cronToken) . '</code></td></tr>';
-        $html .= '<tr><td>CLI worker</td><td><code>php bin/console plunkconnect:outbox:process</code></td></tr>';
-        $html .= '</table></div>';
+        $html .= '<div class="alert alert-info"><b>' . $this->l('Endpoints') . '</b><br>'
+            . 'Webhook: <code>' . htmlspecialchars($webhookUrl) . '</code><br>'
+            . 'Products feed: <code>' . htmlspecialchars($feedUrl) . '</code><br>'
+            . 'Cron URL: <code>' . htmlspecialchars($cronUrl) . '</code><br>'
+            . 'CLI: <code>php bin/console plunkconnect:outbox:process</code></div>'
+            . '</div>';
 
         return $html;
     }
 
-    private function renderSettingsForm(int $idShop): string
+    private function renderForm(): string
     {
-        $config = $this->getConfiguration();
-        $fields = [];
-
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Plunk API URL', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::API_URL,
-            'desc' => $this->trans('e.g. https://api.example.com — no trailing slash needed.', [], 'Modules.Plunkconnect.Admin'),
-            'class' => 'fixed-width-xxl',
-        ];
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Public key (pk_…)', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::PUBLIC_KEY,
-            'desc' => $this->trans('Used for /v1/track. Current: %s', [$config->maskSecret($config->get(ModuleConfiguration::PUBLIC_KEY, $idShop))], 'Modules.Plunkconnect.Admin'),
-            'class' => 'fixed-width-xxl',
-            'autocomplete' => 'off',
-        ];
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Secret key (sk_…)', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::SECRET_KEY,
-            'desc' => $this->trans('Used for /contacts. Current: %s', [$config->maskSecret($config->get(ModuleConfiguration::SECRET_KEY, $idShop))], 'Modules.Plunkconnect.Admin'),
-            'class' => 'fixed-width-xxl',
-            'autocomplete' => 'off',
-        ];
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Consent source label', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::CONSENT_SOURCE,
-            'desc' => $this->trans('Sent as data.consentSource, e.g. website_signup.', [], 'Modules.Plunkconnect.Admin'),
-        ];
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Shop code', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::SHOP_CODE,
-            'desc' => $this->trans('Sent as data.shopCode to tell shops apart in Plunk, e.g. bz.', [], 'Modules.Plunkconnect.Admin'),
-        ];
-
-        // Locale mapping per language.
-        $localeOptions = [];
-        foreach (LocaleMapper::ALLOWED_LOCALES as $locale) {
-            $localeOptions[] = ['id' => $locale, 'name' => $locale];
-        }
-
-        $savedMap = $config->getLocaleMap($idShop);
-        foreach (Language::getLanguages(false, $idShop) as $lang) {
-            $isoNote = 'ru' === strtolower((string) $lang['iso_code'])
-                ? ' ' . $this->trans('(Russian is never sent; fallback applies)', [], 'Modules.Plunkconnect.Admin')
-                : '';
-            $fields[] = [
-                'type' => 'select',
-                'label' => sprintf($this->trans('Locale for %s (iso %s)', [], 'Modules.Plunkconnect.Admin'), $lang['name'], $lang['iso_code']) . $isoNote,
-                'name' => 'PLUNKCONNECT_LOCALE_' . (int) $lang['id_lang'],
-                'options' => ['query' => array_merge([['id' => '', 'name' => $this->trans('— auto (iso code) —', [], 'Modules.Plunkconnect.Admin')]], $localeOptions), 'id' => 'id', 'name' => 'name'],
-            ];
-        }
-
-        $fields[] = [
-            'type' => 'select',
-            'label' => $this->trans('Fallback locale', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::LOCALE_FALLBACK,
-            'desc' => $this->trans('Used for unmapped languages and for Russian (ru is never sent).', [], 'Modules.Plunkconnect.Admin'),
-            'options' => ['query' => $localeOptions, 'id' => 'id', 'name' => 'name'],
-        ];
-
-        // Feature switches.
-        $featureFields = [
-            ModuleConfiguration::FEAT_NEWSLETTER => $this->trans('Newsletter sync', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_DOUBLE_OPTIN => $this->trans('Double opt-in (Plunk confirms)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_TRACKING => $this->trans('Behaviour tracking (stage 2)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_CART => $this->trans('Cart events (stage 2)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_ORDERS => $this->trans('Order events (stage 2)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_FEED => $this->trans('Catalog feed (stage 3)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_COUPONS => $this->trans('Coupons (stage 4)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEAT_BACKINSTOCK => $this->trans('Back-in-stock (stage 4)', [], 'Modules.Plunkconnect.Admin'),
-        ];
-        foreach ($featureFields as $key => $label) {
-            $fields[] = [
-                'type' => 'switch',
-                'label' => $label,
-                'name' => $key,
-                'is_bool' => true,
-                'values' => [
-                    ['id' => $key . '_on', 'value' => 1, 'label' => $this->trans('Yes', [], 'Modules.Plunkconnect.Admin')],
-                    ['id' => $key . '_off', 'value' => 0, 'label' => $this->trans('No', [], 'Modules.Plunkconnect.Admin')],
-                ],
-            ];
-        }
-
-        // Order state mapping multi-selects.
-        $orderStates = OrderState::getOrderStates((int) $this->context->language->id);
-        $osOptions = array_map(static function (array $os): array {
-            return ['id' => (string) $os['id_order_state'], 'name' => $os['name']];
-        }, $orderStates);
-
-        $savedOsMap = json_decode($config->get(ModuleConfiguration::ORDERSTATE_MAP, $idShop) ?: '{}', true);
-        foreach (['paid', 'shipped', 'delivered', 'cancelled', 'refunded'] as $state) {
-            $fields[] = [
-                'type' => 'select',
-                'multiple' => true,
-                'label' => sprintf($this->trans('Order states = %s', [], 'Modules.Plunkconnect.Admin'), $state),
-                'name' => 'PLUNKCONNECT_OS_' . $state . '[]',
-                'options' => ['query' => $osOptions, 'id' => 'id', 'name' => 'name'],
-            ];
-        }
-
-        // CMP consent cookie (stage 2 tracking).
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Marketing consent cookie name', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::CONSENT_COOKIE_NAME,
-            'desc' => $this->trans('Behaviour events are only tracked when this cookie matches the value below. Leave empty to track everyone.', [], 'Modules.Plunkconnect.Admin'),
-        ];
-        $fields[] = [
-            'type' => 'text',
-            'label' => $this->trans('Marketing consent cookie value', [], 'Modules.Plunkconnect.Admin'),
-            'name' => ModuleConfiguration::CONSENT_COOKIE_VALUE,
-        ];
-
         $helper = new HelperForm();
         $helper->module = $this;
         $helper->name_controller = $this->name;
         $helper->token = Tools::getAdminTokenLite('AdminModules');
         $helper->currentIndex = AdminController::$currentIndex . '&configure=' . $this->name;
-        $helper->default_form_language = (int) $this->context->language->id;
+        $helper->default_form_language = (int) Configuration::get('PS_LANG_DEFAULT');
         $helper->allow_employee_form_lang = (int) Configuration::get('PS_BO_ALLOW_EMPLOYEE_FORM_LANG');
         $helper->title = $this->displayName;
-        $helper->submit_action = 'submitPlunkconnectSettings';
-        $helper->fields_value = $this->formValues($idShop);
+        $helper->submit_action = 'submitPlunkConfig';
+        $helper->fields_value = $this->formValues();
 
-        $form = [
-            'form' => [
-                'legend' => ['title' => $this->trans('Plunk connection', [], 'Modules.Plunkconnect.Admin'), 'icon' => 'icon-cogs'],
-                'input' => $fields,
-                'submit' => ['title' => $this->trans('Save', [], 'Modules.Plunkconnect.Admin')],
-            ],
+        $forms = [
+            ['form' => [
+                'legend' => ['title' => $this->l('Plunk connection'), 'icon' => 'icon-plug'],
+                'input' => [
+                    ['type' => 'text', 'label' => $this->l('Plunk API URL'),
+                        'name' => Config::API_URL, 'desc' => $this->l('e.g. https://api.example.com'), 'required' => true],
+                    ['type' => 'password', 'label' => $this->l('Public key (pk_...)'),
+                        'name' => Config::PUBLIC_KEY, 'desc' => $this->l('Leave empty to keep current value.')],
+                    ['type' => 'password', 'label' => $this->l('Secret key (sk_...)'),
+                        'name' => Config::SECRET_KEY, 'desc' => $this->l('Leave empty to keep current value.')],
+                ],
+                'submit' => ['title' => $this->l('Save')],
+                'buttons' => [
+                    ['title' => $this->l('Test connection'), 'name' => 'testPlunkConnection', 'type' => 'submit', 'class' => 'btn btn-default pull-right', 'icon' => 'process-icon-refresh'],
+                ],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Security tokens'), 'icon' => 'icon-key'],
+                'input' => [
+                    ['type' => 'free', 'label' => $this->l('Webhook secret'), 'name' => 'display_webhook'],
+                    ['type' => 'free', 'label' => $this->l('Feed token'), 'name' => 'display_feed'],
+                    ['type' => 'free', 'label' => $this->l('Cron token'), 'name' => 'display_cron'],
+                    ['type' => 'free', 'label' => $this->l('Coupon secret'), 'name' => 'display_coupon'],
+                ],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Locales'), 'icon' => 'icon-globe'],
+                'input' => $this->localeInputs(),
+                'submit' => ['title' => $this->l('Save')],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Order state mapping'), 'icon' => 'icon-truck'],
+                'input' => $this->orderStateInputs(),
+                'submit' => ['title' => $this->l('Save')],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Features'), 'icon' => 'icon-cogs'],
+                'input' => $this->featureInputs(),
+                'submit' => ['title' => $this->l('Save')],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Coupon rules'), 'icon' => 'icon-tags'],
+                'input' => [
+                    ['type' => 'textarea', 'label' => $this->l('Rules (JSON)'), 'name' => Config::COUPON_RULES,
+                        'desc' => $this->l('One entry per rule name: {"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}. Fields: type percent|amount|free_shipping, value, validDays, minAmount, prefix, excludeSpecial, event (informational).')],
+                ],
+                'submit' => ['title' => $this->l('Save')],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Misc'), 'icon' => 'icon-wrench'],
+                'input' => [
+                    ['type' => 'text', 'label' => $this->l('consentSource'), 'name' => Config::CONSENT_SOURCE,
+                        'desc' => $this->l('Value sent as data.consentSource, e.g. website_signup')],
+                    ['type' => 'text', 'label' => $this->l('shopCode'), 'name' => Config::SHOP_CODE,
+                        'desc' => $this->l('Short shop identifier sent with every event, e.g. bz')],
+                    ['type' => 'text', 'label' => $this->l('Marketing consent cookie'), 'name' => Config::CONSENT_COOKIE,
+                        'desc' => $this->l('Cookie set by your CMP that allows view tracking. Empty = always track.')],
+                    ['type' => 'text', 'label' => $this->l('Consent cookie value'), 'name' => Config::CONSENT_COOKIE_VALUE,
+                        'desc' => $this->l('Expected value (or one of comma-separated values), e.g. marketing')],
+                ],
+                'submit' => ['title' => $this->l('Save')],
+            ]],
         ];
 
-        $html = $helper->generateForm([$form]);
-
-        // Token management block (separate small forms).
-        $html .= '<div class="panel"><h3>' . $this->trans('Tokens', [], 'Modules.Plunkconnect.Admin') . '</h3><table class="table">';
-        foreach ([
-            ModuleConfiguration::WEBHOOK_SECRET => $this->trans('Webhook secret (Bearer for the inbound webhook)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::CRON_TOKEN => $this->trans('Cron token (for the cron front controller)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::FEED_TOKEN => $this->trans('Feed token (stage 3 feeds)', [], 'Modules.Plunkconnect.Admin'),
-            ModuleConfiguration::COUPON_SECRET => $this->trans('Coupon secret (Bearer for the coupon endpoint, stage 4)', [], 'Modules.Plunkconnect.Admin'),
-        ] as $key => $label) {
-            $html .= '<tr><td>' . $label . '</td><td><code>' . htmlspecialchars($config->get($key, $idShop)) . '</code></td>'
-                . '<td><form method="post" style="display:inline"><input type="hidden" name="token_key" value="' . $key . '">'
-                . '<button type="submit" name="plunkconnectRegenToken" class="btn btn-default btn-xs">' . $this->trans('Regenerate', [], 'Modules.Plunkconnect.Admin') . '</button></form></td></tr>';
-        }
-        $html .= '</table></div>';
-
-        return $html;
+        return $helper->generateForm($forms);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function formValues(int $idShop): array
+    private function localeInputs(): array
     {
-        $config = $this->getConfiguration();
-        $values = [
-            ModuleConfiguration::API_URL => $config->get(ModuleConfiguration::API_URL, $idShop),
-            ModuleConfiguration::PUBLIC_KEY => '',
-            ModuleConfiguration::SECRET_KEY => '',
-            ModuleConfiguration::CONSENT_SOURCE => $config->get(ModuleConfiguration::CONSENT_SOURCE, $idShop) ?: 'website_signup',
-            ModuleConfiguration::SHOP_CODE => $config->get(ModuleConfiguration::SHOP_CODE, $idShop),
-            ModuleConfiguration::LOCALE_FALLBACK => $config->getLocaleFallback($idShop),
-            ModuleConfiguration::CONSENT_COOKIE_NAME => $config->get(ModuleConfiguration::CONSENT_COOKIE_NAME, $idShop),
-            ModuleConfiguration::CONSENT_COOKIE_VALUE => $config->get(ModuleConfiguration::CONSENT_COOKIE_VALUE, $idShop),
+        $inputs = [];
+        $map = Config::getJson(Config::LOCALE_MAP);
+        $options = [];
+        foreach (LocaleMapper::ALLOWED as $loc) {
+            $options[] = ['id' => $loc, 'name' => $loc];
+        }
+        foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {
+            $inputs[] = [
+                'type' => 'select',
+                'label' => sprintf($this->l('Language #%d (%s)'), $idLang, $iso),
+                'name' => 'PLUNK_LOCALE_' . $idLang,
+                'options' => ['query' => $options, 'id' => 'id', 'name' => 'name'],
+            ];
+        }
+        $inputs[] = [
+            'type' => 'select',
+            'label' => $this->l('Fallback locale (e.g. for ru)'),
+            'name' => Config::LOCALE_FALLBACK,
+            'options' => ['query' => $options, 'id' => 'id', 'name' => 'name'],
+            'desc' => $this->l('ru can never be a target; mapped languages falling outside lt/lv/et/en/pl use this locale.'),
         ];
 
-        // Keys: leave fields empty (placeholder shows masked value) unless a
-        // new value was POSTed — avoids re-saving masked values or blanking.
-        if (Tools::isSubmit('submitPlunkconnectSettings')) {
-            $values[ModuleConfiguration::PUBLIC_KEY] = (string) Tools::getValue(ModuleConfiguration::PUBLIC_KEY);
-            $values[ModuleConfiguration::SECRET_KEY] = (string) Tools::getValue(ModuleConfiguration::SECRET_KEY);
-        } else {
-            // Show nothing sensitive; admin only fills when rotating keys.
-            $values[ModuleConfiguration::PUBLIC_KEY] = '';
-            $values[ModuleConfiguration::SECRET_KEY] = '';
+        return $inputs;
+    }
+
+    private function orderStateInputs(): array
+    {
+        $states = OrderState::getOrderStates((int) Context::getContext()->language->id);
+        $options = [];
+        foreach ($states as $state) {
+            $options[] = ['id' => (int) $state['id_order_state'], 'name' => $state['name']];
         }
 
-        $savedMap = $config->getLocaleMap($idShop);
-        foreach (Language::getLanguages(false, $idShop) as $lang) {
-            $values['PLUNKCONNECT_LOCALE_' . (int) $lang['id_lang']] = $savedMap[(int) $lang['id_lang']] ?? '';
+        $inputs = [];
+        foreach (['paid', 'shipped', 'delivered', 'cancelled', 'refunded'] as $event) {
+            $inputs[] = [
+                'type' => 'select',
+                'multiple' => true,
+                'size' => 6,
+                'label' => sprintf($this->l('Order states meaning "%s"'), 'order.' . $event),
+                'name' => 'PLUNK_OS_' . $event . '[]',
+                'options' => ['query' => $options, 'id' => 'id', 'name' => 'name'],
+            ];
         }
 
-        foreach ([
-            ModuleConfiguration::FEAT_NEWSLETTER,
-            ModuleConfiguration::FEAT_DOUBLE_OPTIN,
-            ModuleConfiguration::FEAT_TRACKING,
-            ModuleConfiguration::FEAT_CART,
-            ModuleConfiguration::FEAT_ORDERS,
-            ModuleConfiguration::FEAT_FEED,
-            ModuleConfiguration::FEAT_COUPONS,
-            ModuleConfiguration::FEAT_BACKINSTOCK,
-        ] as $flag) {
-            $values[$flag] = (int) $config->getBool($flag, $idShop);
+        return $inputs;
+    }
+
+    private function featureInputs(): array
+    {
+        $features = [
+            [Config::FEAT_SUBSCRIPTIONS, 'Newsletter sync (PS <-> Plunk)'],
+            [Config::FEAT_DOUBLE_OPTIN, 'Double opt-in (sign up via Plunk confirmation email)'],
+            [Config::FEAT_VIEWS, 'View tracking (product/category)'],
+            [Config::FEAT_CART, 'Cart events + abandoned cart link'],
+            [Config::FEAT_ORDERS, 'Order events'],
+            [Config::FEAT_FEED, 'Catalog feed + live products + recommendations'],
+            [Config::FEAT_COUPONS, 'Coupon endpoint (replaces newsmancoupons)'],
+            [Config::FEAT_BACKINSTOCK, 'Back-in-stock events (ps_emailalerts)'],
+            [Config::FEAT_PK_CAPTURE, 'Identify visitors from Plunk email clicks (?pk_e=)'],
+        ];
+
+        $inputs = [];
+        foreach ($features as [$key, $label]) {
+            $inputs[] = [
+                'type' => 'switch',
+                'label' => $this->l($label),
+                'name' => $key,
+                'values' => [
+                    ['id' => $key . '_on', 'value' => 1, 'label' => $this->l('Yes')],
+                    ['id' => $key . '_off', 'value' => 0, 'label' => $this->l('No')],
+                ],
+            ];
         }
 
-        $savedOsMap = json_decode($config->get(ModuleConfiguration::ORDERSTATE_MAP, $idShop) ?: '{}', true);
-        foreach (['paid', 'shipped', 'delivered', 'cancelled', 'refunded'] as $state) {
-            $values['PLUNKCONNECT_OS_' . $state . '[]'] = $savedOsMap[$state] ?? [];
+        return $inputs;
+    }
+
+    private function formValues(): array
+    {
+        $mask = fn (string $k) => $this->maskedTokenField($k);
+        $values = [
+            Config::API_URL => Config::get(Config::API_URL),
+            Config::PUBLIC_KEY => '',
+            Config::SECRET_KEY => '',
+            Config::CONSENT_SOURCE => Config::get(Config::CONSENT_SOURCE),
+            Config::SHOP_CODE => Config::get(Config::SHOP_CODE),
+            Config::CONSENT_COOKIE => Config::get(Config::CONSENT_COOKIE),
+            Config::CONSENT_COOKIE_VALUE => Config::get(Config::CONSENT_COOKIE_VALUE),
+            Config::LOCALE_FALLBACK => LocaleMapper::fallback(),
+            'display_webhook' => $mask(Config::WEBHOOK_SECRET),
+            'display_feed' => $mask(Config::FEED_TOKEN),
+            'display_cron' => $mask(Config::CRON_TOKEN),
+            'display_coupon' => $mask(Config::COUPON_SECRET),
+            Config::COUPON_RULES => Config::get(Config::COUPON_RULES),
+        ];
+        foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
+            Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
+            Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE] as $key) {
+            $values[$key] = (int) Config::getBool($key);
+        }
+        foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {
+            $values['PLUNK_LOCALE_' . $idLang] = LocaleMapper::forLang($idLang);
+        }
+        $stateMap = Config::getJson(Config::ORDERSTATE_MAP);
+        foreach (['paid', 'shipped', 'delivered', 'cancelled', 'refunded'] as $event) {
+            $values['PLUNK_OS_' . $event . '[]'] = array_map('intval', (array) ($stateMap[$event] ?? []));
         }
 
         return $values;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Helpers */
-    /* ------------------------------------------------------------------ */
-
-    private function langIso(int $idLang): string
+    private function maskedTokenField(string $key): string
     {
-        $lang = new Language($idLang);
+        $token = (string) Config::get($key);
+        $masked = '' === $token ? $this->l('(not set)') : substr($token, 0, 6) . '***' . substr($token, -4);
+        $regenUrl = AdminController::$currentIndex
+            . '&configure=' . $this->name
+            . '&token=' . Tools::getAdminTokenLite('AdminModules')
+            . '&regenPlunkToken=1&token_key=' . urlencode($key);
 
-        return Validate::isLoadedObject($lang) ? (string) $lang->iso_code : '';
-    }
-
-    private function logError(string $where, Throwable $e): void
-    {
-        PrestaShopLogger::addLog(
-            sprintf('PlunkConnect %s: %s', $where, $e->getMessage()),
-            3,
-            (int) $e->getCode() ?: null,
-            'PlunkConnect',
-            null,
-            true
-        );
+        return '<div class="form-control-static"><code>' . htmlspecialchars($masked) . '</code>'
+            . ' <a class="btn btn-default btn-xs" href="' . htmlspecialchars($regenUrl) . '">'
+            . $this->l('Regenerate') . '</a></div>';
     }
 }

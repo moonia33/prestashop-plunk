@@ -1,117 +1,68 @@
 <?php
 
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
- *
  * POST /module/plunkconnect/webhook
- *
- * Inbound endpoint for Plunk workflow WEBHOOK steps (contact.subscribed /
- * contact.unsubscribed etc.). Auth: Authorization: Bearer <webhook secret>
- * or HMAC (X-Plunk-Timestamp + X-Plunk-Signature) — see
- * WebhookAuthenticator.
- *
- * @author  TV Parkas
- * @license MIT
+ * Plunk workflow WEBHOOK step -> PS subscription flags.
+ * Auth: X-Plunk-Timestamp + X-Plunk-Signature HMAC, or Bearer secret fallback.
  */
+require_once dirname(__DIR__, 2) . '/autoload.php';
 
-declare(strict_types=1);
-
-if (!defined('_PS_VERSION_')) {
-    exit;
-}
-
-use PlunkConnect\Config\ModuleConfiguration;
-use PlunkConnect\Newsletter\WebhookHandler;
-use PlunkConnect\Security\WebhookAuthenticator;
+use PlunkConnect\Config;
+use PlunkConnect\Service\RequestAuth;
+use PlunkConnect\Service\SubscriptionService;
 
 class PlunkconnectWebhookModuleFrontController extends ModuleFrontController
 {
-    /** @var bool */
-    public $auth = false;
-    /** @var bool */
-    public $guestAllowed = true;
-    /** @var bool */
-    public $ssl = true;
-
     public function postProcess(): void
     {
-        if ('POST' !== strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''))) {
-            $this->jsonResponse(405, ['error' => 'method not allowed']);
+        if ('POST' !== strtoupper((string) $_SERVER['REQUEST_METHOD'])) {
+            $this->respond(405, ['ok' => false, 'error' => 'method_not_allowed']);
         }
 
-        $module = $this->module;
-        if (!$module instanceof Plunkconnect) {
-            $this->jsonResponse(500, ['error' => 'module unavailable']);
-        }
-        $config = $module->getConfiguration();
-        $idShop = (int) $this->context->shop->id;
-
-        $secret = $config->get(ModuleConfiguration::WEBHOOK_SECRET, $idShop);
         $rawBody = (string) file_get_contents('php://input');
-        if (strlen($rawBody) > 65536) {
-            $this->jsonResponse(413, ['error' => 'payload too large']);
-        }
-
-        $authenticator = new WebhookAuthenticator($secret);
-        if (!$authenticator->isValid($rawBody, $this->requestHeaders())) {
-            $this->jsonResponse(401, ['error' => 'unauthorized']);
+        if (!RequestAuth::verifySignedRequest($rawBody)) {
+            $this->respond(401, ['ok' => false, 'error' => 'unauthorized']);
         }
 
         $body = json_decode($rawBody, true);
         if (!is_array($body)) {
-            $this->jsonResponse(400, ['error' => 'invalid json']);
+            $this->respond(400, ['ok' => false, 'error' => 'invalid_json']);
         }
 
-        $subscription = WebhookHandler::extractSubscription($body);
-        if (null === $subscription) {
-            $this->jsonResponse(422, ['error' => 'no subscription decision in payload']);
+        $event = (string) ($body['event'] ?? $body['type'] ?? '');
+        $email = strtolower(trim((string) (
+            $body['email']
+            ?? $body['data']['email']
+            ?? $body['contact']['email']
+            ?? ''
+        )));
+
+        if (!in_array($event, ['contact.subscribed', 'contact.unsubscribed'], true)) {
+            // Unknown events are acknowledged but ignored (idempotent).
+            $this->respond(200, ['ok' => true, 'ignored' => '' !== $event ? $event : 'empty']);
+        }
+        if (!Validate::isEmail($email)) {
+            $this->respond(400, ['ok' => false, 'error' => 'invalid_email']);
         }
 
-        try {
-            $result = (new WebhookHandler())->applySubscription(
-                $subscription['email'],
-                $subscription['subscribed'],
-                $idShop,
-                (int) $this->context->language->id
-            );
-        } catch (Throwable $e) {
-            PrestaShopLogger::addLog('PlunkConnect webhook failed: ' . $e->getMessage(), 3, null, 'PlunkConnect', null, true);
-            $this->jsonResponse(500, ['error' => 'internal error']);
+        // The shop receiving the request scopes the update; a shopCode that
+        // does not match this shop's config is rejected outright.
+        if (isset($body['shopCode'])
+            && (string) $body['shopCode'] !== (string) Config::get(Config::SHOP_CODE)) {
+            $this->respond(400, ['ok' => false, 'error' => 'shop_code_mismatch']);
         }
+        $idShop = (int) Context::getContext()->shop->id;
 
-        $this->jsonResponse(200, ['success' => true, 'changed' => $result['changed']]);
+        $result = SubscriptionService::applyWebhook($email, 'contact.subscribed' === $event, $idShop);
+
+        $this->respond(200, ['ok' => true, 'event' => $event] + $result);
     }
 
-    /**
-     * @return array<string, string> lowercase header names
-     */
-    private function requestHeaders(): array
-    {
-        $headers = [];
-        foreach ($_SERVER as $key => $value) {
-            if (0 === strpos($key, 'HTTP_')) {
-                $name = strtolower(str_replace('_', '-', substr($key, 5)));
-                $headers[$name] = (string) $value;
-            }
-        }
-        if (isset($_SERVER['CONTENT_TYPE'])) {
-            $headers['content-type'] = (string) $_SERVER['CONTENT_TYPE'];
-        }
-
-        return $headers;
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     *
-     * @return never
-     */
-    private function jsonResponse(int $status, array $payload): void
+    private function respond(int $status, array $body): void
     {
         http_response_code($status);
         header('Content-Type: application/json');
         header('Cache-Control: no-store');
-        echo json_encode($payload);
-        exit;
+        exit(json_encode($body));
     }
 }

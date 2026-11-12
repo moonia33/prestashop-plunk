@@ -3,9 +3,10 @@
     <name>plunkconnect</name>
     <displayName><![CDATA[Plunk Connect]]></displayName>
     <version><![CDATA[1.0.0]]></version>
-    <description><![CDATA[Syncs the shop with a self-hosted Plunk instance: newsletter subscriptions (double opt-in), inbound webhook, GDPR. All API calls go through a queued outbox.]]></description>
+    <description><![CDATA[Connects PrestaShop to a self-hosted Plunk instance: newsletter sync (double opt-in), behavioural events, catalog feed and coupons. Replaces Newsman.]]></description>
     <author><![CDATA[TV Parkas]]></author>
     <tab><![CDATA[advertising_marketing]]></tab>
+    <confirmUninstall><![CDATA[Are you sure? All queued Plunk events will be lost. Plunk-side data is not touched.]]></confirmUninstall>
     <is_configurable>1</is_configurable>
     <need_instance>0</need_instance>
 </module>

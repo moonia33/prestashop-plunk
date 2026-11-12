@@ -1,20 +1,21 @@
 services:
     _defaults:
+        public: true
         autowire: false
         autoconfigure: false
-        public: true
 
-    plunkconnect.command.process_outbox:
+    plunkconnect.command.outbox_process:
         class: PlunkConnect\Command\ProcessOutboxCommand
-        tags:
-            - { name: console.command }
+        tags: ['console.command']
 
-    plunkconnect.command.backfill_subscribers:
+    plunkconnect.command.subscribers_backfill:
         class: PlunkConnect\Command\BackfillSubscribersCommand
-        tags:
-            - { name: console.command }
+        tags: ['console.command']
 
-    plunkconnect.command.reconcile_subscribers:
+    plunkconnect.command.subscribers_reconcile:
         class: PlunkConnect\Command\ReconcileSubscribersCommand
-        tags:
-            - { name: console.command }
+        tags: ['console.command']
+
+    plunkconnect.command.coupons_cleanup:
+        class: PlunkConnect\Command\CleanupCouponsCommand
+        tags: ['console.command']

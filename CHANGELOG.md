@@ -1,16 +1,22 @@
 # Changelog
 
-## [1.0.0] – 2026-11-12
+All notable changes to `plunkconnect` are documented here.
 
-### 1 etapas – skeletas ir prenumeratos (pakeičia Newsman naujienlaiškiams)
+## [1.0.0] - 2026-11-12
 
-- Modulio skeletas: PSR-4 `PlunkConnect\`, multistore konfigūracija (viskas per `id_shop`).
-- Admin konfigūracija: Plunk API URL, `pk_`/`sk_` raktai (rodomi užmaskuoti), „Tikrinti ryšį“, webhook/cron/feed tokenai (generuojami, pergeneruojami), kalbų žemėlapis + fallback (`ru` niekada nesiunčiama), užsakymų būsenų žemėlapis, funkcijų jungikliai, outbox būsena ir paskutinės klaidos, „re-queue dead“.
-- Outbox (`ps_plunk_outbox`): hook'ai tik rašo eilutę; sutraukimas per `dedupe_key`; `Idempotency-Key` (UUID) kiekvienai žinutei.
-- Worker'is: `bin/console plunkconnect:outbox:process` + `GET /module/plunkconnect/cron?token=…` (iki 200 žinučių, ~50 s, ≤20 req/s, `Retry-After` gerbiamas, eksponentinis retry 1/5/15/60 min/6 h, 8 bandymai → dead, 4xx → dead, 409 idempotency → sėkmė). `sent` senesni nei 7 d. trinami partijomis.
-- Prenumeratos PS → Plunk: `actionNewsletterRegistrationBefore/After` (svečio forma, įsk. atsisakymą per shutdown patikrą), `actionCustomerAccountAdd`, `actionObjectCustomerUpdateBefore/After` (newsletter 0↔1). Double opt-in režimas siunčia `newsletter.signup_requested` su `subscribed=false`; be DOI – `newsletter.subscribed`. Atsisakymas – `newsletter.unsubscribed` su `subscribed=false`. Visada `data.locale`, `consentSource`, `consentRequestedAt`, `consentIp`, `consentReferer`, `shopCode`.
-- Webhook Plunk → PS: `POST /module/plunkconnect/webhook` su `Authorization: Bearer <webhook secret>` (Plunk WEBHOOK žingsnis HMAC nemoka — patikrinta `useplunk/plunk@next` `WorkflowExecutionService::executeWebhook`); papildomai priimamas ir HMAC (`X-Plunk-Timestamp` + `X-Plunk-Signature`, ±300 s). Atnaujina `ps_customer.newsletter` ir `ps_emailsubscription` (delete on unsubscribe / insert+activate on subscribe). Idempotentiška.
-- `bin/console plunkconnect:subscribers:backfill --since=YYYY-MM-DD [--dry-run]` – upsert'ai be `subscribed` (esami kontaktai nekeičiami; nauji pagal Plunk nutylėjimą tampa subscribed).
-- `bin/console plunkconnect:subscribers:reconcile` – naktinis skirtumų raportas (tik log'ina).
-- GDPR (psgdpr): `actionDeleteGDPRCustomer` → `delete` outbox žinutė (lookup per `GET /contacts?search=` + `DELETE /contacts/:id`); `actionExportGDPRData` → kas siunčiama į Plunk.
-- Kokybė: PHPStan level 6, php-cs-fixer (@Symfony), 34 PHPUnit testai, GitHub Actions CI.
+### Added
+- Module skeleton compatible with PrestaShop 8.1 - 9.x (PHP >= 8.1), multistore-aware configuration.
+- Outbox table (`PREFIX_plunk_outbox`) with dedupe collapse, exponential retry (1m/5m/15m/1h/6h, dead after 8 attempts), locked worker claiming and 7-day sent-row cleanup.
+- Outbox worker: `php bin/console plunkconnect:outbox:process`, cron front controller and `actionCronJob` hook.
+- Newsletter sync PS -> Plunk: `newsletter.signup_requested` (double opt-in) / `newsletter.subscribed` / `newsletter.unsubscribed` via `ps_emailsubscription`, registration, account-update and checkout hooks.
+- Plunk -> PS webhook (`/module/plunkconnect/webhook`) with `X-Plunk-Timestamp` + `X-Plunk-Signature` HMAC (300 s window) or static Bearer fallback; updates `ps_customer.newsletter` and `ps_emailsubscription.active` idempotently.
+- Console commands `plunkconnect:subscribers:backfill` (`--since`, `--dry-run`) and `plunkconnect:subscribers:reconcile` (report-only).
+- Behavioural events: `customer.registered`, `product.viewed` (30-min debounce), `category.viewed`, `cart.updated` (outbox collapse), `order.placed` + `order.{paid,shipped,delivered,cancelled,refunded}` via order-state mapping, `product.back_in_stock` (ps_emailalerts).
+- Visitor identification: logged-in customer, guest-checkout email, `?pk_e=` email-link token -> `plunk_id` cookie (HMAC, 365 d, HttpOnly/Secure/SameSite=Lax). Anonymous views buffered and flushed as one event.
+- Marketing-consent cookie gate for view tracking.
+- Signed cart-restore links (`/module/plunkconnect/restorecart`, 30 d, cart secure_key HMAC).
+- Catalog feed: `GET /module/plunkconnect/feed/{products,categories}` (cursor pagination, `updated_since`), `GET /module/plunkconnect/products` (live price/stock, max 50 ids), `GET /module/plunkconnect/recommendations` (accessories + category best sellers, in-stock only).
+- Coupon endpoint `POST /module/plunkconnect/coupon` (HMAC) creating single-use CartRules; code persisted on the contact as `lastCouponCode`/`lastCouponValidUntil`.
+- GDPR: `actionDeleteGDPRCustomer` queues contact lookup+delete; `actionExportGDPRData` reports exported fields.
+- Admin configuration: API keys (masked), token regeneration, locale map (never `ru`), order-state map, feature toggles, outbox status panel with last errors, process-now and retry-dead actions.
+- PHPUnit tests (HMAC, email masking, outbox retry/uuid, locale allow-list), phpstan + php-cs-fixer configs.

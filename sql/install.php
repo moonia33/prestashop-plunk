@@ -1,33 +1,56 @@
 <?php
 
-declare(strict_types=1);
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
- *
- * @author  TV Parkas
- * @license MIT
+ * Module install SQL. One indexed outbox table - no locks, no heavy queries.
  */
 $sql = [];
 
-$sql[] = 'CREATE TABLE IF NOT EXISTS `_DB_PREFIX_plunk_outbox` (
-    `id_outbox` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-    `id_shop` int(11) unsigned NOT NULL DEFAULT 1,
-    `uuid` char(36) NOT NULL,
-    `endpoint` varchar(16) NOT NULL,
-    `dedupe_key` varchar(191) DEFAULT NULL,
-    `payload` mediumtext NOT NULL,
-    `status` varchar(16) NOT NULL DEFAULT \'pending\',
-    `attempts` smallint(5) unsigned NOT NULL DEFAULT 0,
-    `next_attempt_at` datetime NOT NULL,
-    `locked_by` varchar(64) DEFAULT NULL,
-    `last_error` varchar(500) DEFAULT NULL,
-    `date_add` datetime NOT NULL,
-    `date_upd` datetime NOT NULL,
+$sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_outbox` (
+    `id_outbox` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `id_shop` INT UNSIGNED NOT NULL DEFAULT 0,
+    `uuid` VARCHAR(36) NOT NULL,
+    `endpoint` VARCHAR(16) NOT NULL,
+    `dedupe_key` VARCHAR(191) DEFAULT NULL,
+    `payload` MEDIUMTEXT NOT NULL,
+    `status` ENUM(\'pending\',\'processing\',\'sent\',\'failed\',\'dead\') NOT NULL DEFAULT \'pending\',
+    `attempts` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    `next_attempt_at` DATETIME NOT NULL,
+    `locked_by` VARCHAR(64) DEFAULT NULL,
+    `last_error` VARCHAR(500) DEFAULT NULL,
+    `date_add` DATETIME NOT NULL,
+    `date_upd` DATETIME NOT NULL,
     PRIMARY KEY (`id_outbox`),
     UNIQUE KEY `uuid` (`uuid`),
-    KEY `status_next_attempt` (`status`, `next_attempt_at`),
-    KEY `dedupe_key` (`dedupe_key`),
-    KEY `locked_by` (`locked_by`)
-) ENGINE=_MYSQL_ENGINE_ DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;';
+    KEY `status_next` (`status`, `next_attempt_at`),
+    KEY `dedupe_key` (`dedupe_key`)
+) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
 
-return $sql;
+$sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_coupon` (
+    `id_plunk_coupon` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `id_cart_rule` INT UNSIGNED NOT NULL,
+    `id_shop` INT UNSIGNED NOT NULL DEFAULT 0,
+    `email` VARCHAR(255) NOT NULL,
+    `rule` VARCHAR(64) NOT NULL,
+    `id_cart` INT UNSIGNED NOT NULL DEFAULT 0,
+    `execution_id` VARCHAR(64) NOT NULL DEFAULT \'\',
+    `code` VARCHAR(64) NOT NULL,
+    `type` VARCHAR(32) NOT NULL DEFAULT \'percent\',
+    `value` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `min_amount` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `date_add` DATETIME NOT NULL,
+    `date_exp` DATETIME NOT NULL,
+    PRIMARY KEY (`id_plunk_coupon`),
+    UNIQUE KEY `id_cart_rule` (`id_cart_rule`),
+    UNIQUE KEY `code` (`code`),
+    UNIQUE KEY `idem` (`email`, `rule`, `id_cart`, `execution_id`),
+    KEY `email_rule` (`email`, `rule`),
+    KEY `date_exp` (`date_exp`)
+) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+
+foreach ($sql as $query) {
+    if (!Db::getInstance()->execute($query)) {
+        return false;
+    }
+}
+
+return true;
