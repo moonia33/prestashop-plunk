@@ -1,197 +1,101 @@
 <?php
 
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
+ * `php bin/console plunkconnect:subscribers:reconcile`.
  *
- * bin/console plunkconnect:subscribers:reconcile
- *
- * Nightly comparison of PrestaShop newsletter flags against Plunk
- * subscription state. Only REPORTS mismatches — it never (re)subscribes
- * anyone automatically.
- *
- * @author  TV Parkas
- * @license MIT
+ * Nightly consistency check: lists Plunk contacts (cursor-paginated) and
+ * compares with PrestaShop subscription flags. Differences are REPORTED
+ * only - nothing is subscribed or unsubscribed automatically.
  */
-
-declare(strict_types=1);
 
 namespace PlunkConnect\Command;
 
-use PlunkConnect\Config\ModuleConfiguration;
+use PlunkConnect\Api\PlunkClient;
 use PlunkConnect\Util\EmailMask;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 class ReconcileSubscribersCommand extends Command
 {
-    private const MAX_PAGES = 1000; // 100k contacts safety cap
+    protected static $defaultName = 'plunkconnect:subscribers:reconcile';
+    private const MAX_PAGES = 200; // 200 * 250 = 50k contacts cap per run
 
     protected function configure(): void
     {
         $this
             ->setName('plunkconnect:subscribers:reconcile')
-            ->setDescription('Report differences between PrestaShop newsletter flags and Plunk subscription state')
-            ->addOption('shop', 's', InputOption::VALUE_OPTIONAL, 'Only this shop id');
+            ->setDescription('Report (never fix) subscription mismatches between PrestaShop and Plunk.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $module = \Module::getInstanceByName('plunkconnect');
-        if (!$module instanceof \Plunkconnect || !$module->active) {
-            $output->writeln('<error>Module plunkconnect is not installed/active</error>');
-
-            return 1;
-        }
-
-        /** @var ModuleConfiguration $config */
-        $config = $module->getConfiguration();
-        $shopFilter = null !== $input->getOption('shop') ? (int) $input->getOption('shop') : null;
-        $shopIds = null !== $shopFilter ? [$shopFilter] : $this->allShopIds();
-        $exitCode = 0;
-
-        foreach ($shopIds as $idShop) {
-            if (!$config->isConfigured($idShop)) {
-                continue;
-            }
-            if ('' === $config->get(ModuleConfiguration::SECRET_KEY, $idShop)) {
-                $output->writeln(sprintf('<comment>Shop %d: no secret key – skipped</comment>', $idShop));
-                continue;
-            }
-
-            $output->writeln(sprintf('Reconciling shop %d…', $idShop));
-
-            $plunk = $this->fetchPlunkStates($config, $idShop, $output);
-            if (null === $plunk) {
-                $exitCode = 1;
-                continue;
-            }
-
-            $mismatches = $this->compare($idShop, $plunk);
-
-            $output->writeln(sprintf(
-                '  Plunk contacts: %d | PS subscribed: %d | mismatches: %d',
-                count($plunk),
-                $this->countPsSubscribed($idShop),
-                count($mismatches)
-            ));
-
-            foreach (array_slice($mismatches, 0, 50) as $line) {
-                $output->writeln('  ' . $line);
-            }
-            if (count($mismatches) > 50) {
-                $output->writeln(sprintf('  …and %d more (see log)', count($mismatches) - 50));
-            }
-            foreach ($mismatches as $line) {
-                \PrestaShopLogger::addLog('PlunkConnect reconcile: ' . $line, 2, null, 'PlunkConnect', null, true);
-            }
-        }
-
-        return $exitCode;
-    }
-
-    /**
-     * Pulls every Plunk contact's email+subscribed state via cursor pages.
-     *
-     * @return array<string, bool>|null lowercase email => subscribed
-     */
-    private function fetchPlunkStates(ModuleConfiguration $config, int $idShop, OutputInterface $output): ?array
-    {
-        $client = $config->createClient($idShop);
+        $client = new PlunkClient();
         $cursor = null;
-        $states = [];
+        $checked = 0;
+        $missingInPs = 0;
+        $missingInPlunk = 0;
+        $pages = 0;
 
-        for ($page = 0; $page < self::MAX_PAGES; ++$page) {
-            $response = $client->listContacts(100, $cursor);
-            if (!$response->isSuccess() || !is_array($response->body)) {
-                $output->writeln(sprintf(
-                    '<error>Shop %d: GET /contacts failed (HTTP %d)</error>',
-                    $idShop,
-                    $response->statusCode
-                ));
+        do {
+            $response = $client->listContacts($cursor, 250);
+            if (($response['status'] ?? 0) !== 200 || !is_array($response['body'])) {
+                $output->writeln('<error>Plunk list failed: HTTP ' . ($response['status'] ?? 0) . '</error>');
 
-                return null;
+                return 1;
             }
-
-            $items = $response->body['data'] ?? [];
-            if (!is_array($items)) {
-                break;
-            }
-
-            foreach ($items as $contact) {
-                if (isset($contact['email']) && is_string($contact['email'])) {
-                    $states[strtolower($contact['email'])] = !empty($contact['subscribed']);
+            $body = $response['body'];
+            $contacts = $body['contacts'] ?? $body['data'] ?? (array_is_list($body) ? $body : []);
+            foreach ((array) $contacts as $contact) {
+                $email = strtolower((string) ($contact['email'] ?? ''));
+                if (!\Validate::isEmail($email)) {
+                    continue;
+                }
+                ++$checked;
+                $plunkSubscribed = (bool) ($contact['subscribed'] ?? false);
+                $psSubscribed = $this->isSubscribedInPs($email);
+                if ($plunkSubscribed && !$psSubscribed) {
+                    ++$missingInPs;
+                    $output->writeln('  in_plunk_only: ' . EmailMask::mask($email));
+                } elseif (!$plunkSubscribed && $psSubscribed) {
+                    ++$missingInPlunk;
+                    $output->writeln('  in_ps_only:    ' . EmailMask::mask($email));
                 }
             }
+            $cursor = $body['nextCursor'] ?? $body['cursor'] ?? null;
+            ++$pages;
+        } while ($cursor && $contacts && $pages < self::MAX_PAGES);
 
-            $hasMore = !empty($response->body['hasMore']);
-            $next = isset($response->body['cursor']) ? (string) $response->body['cursor'] : '';
-            if (!$hasMore || '' === $next) {
-                break;
-            }
-            $cursor = $next;
+        $output->writeln(sprintf(
+            'reconcile done: checked=%d, plunk_only=%d, ps_only=%d',
+            $checked,
+            $missingInPs,
+            $missingInPlunk
+        ));
 
-            usleep(50000); // stay well under rate limits
-        }
-
-        return $states;
+        return 0;
     }
 
     /**
-     * @param array<string, bool> $plunk
-     *
-     * @return string[] human-readable mismatch lines (masked emails)
+     * newsletter=1 on a customer row OR active=1 in ps_emailsubscription.
      */
-    private function compare(int $idShop, array $plunk): array
+    private function isSubscribedInPs(string $email): bool
     {
         $db = \Db::getInstance();
-        $mismatches = [];
-        $seen = [];
-
-        $rows = (array) $db->executeS(
-            'SELECT `email`, `newsletter` AS sub, \'customer\' AS src, `id_lang` FROM `' . _DB_PREFIX_ . 'customer`
-            WHERE `id_shop` = ' . (int) $idShop . ' AND `newsletter` = 1
-            UNION ALL
-            SELECT `email`, `active` AS sub, \'emailsubscription\' AS src, `id_lang` FROM `' . _DB_PREFIX_ . 'emailsubscription`
-            WHERE `id_shop` = ' . (int) $idShop . ' AND `active` = 1'
+        $customer = (int) $db->getValue(
+            'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
+             WHERE `email` = \'' . pSQL($email) . '\' AND `newsletter` = 1 AND `deleted` = 0'
         );
-
-        foreach ($rows as $row) {
-            $email = strtolower((string) $row['email']);
-            $seen[$email] = true;
-            if (!array_key_exists($email, $plunk)) {
-                $mismatches[] = sprintf('%s subscribed in PS (%s) but missing in Plunk', EmailMask::mask($email), $row['src']);
-            } elseif (!$plunk[$email]) {
-                $mismatches[] = sprintf('%s subscribed in PS (%s) but unsubscribed in Plunk', EmailMask::mask($email), $row['src']);
-            }
+        if ($customer > 0) {
+            return true;
+        }
+        if ($db->getValue('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
+            return (int) $db->getValue(
+                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
+                 WHERE `email` = \'' . pSQL($email) . '\' AND `active` = 1'
+            ) > 0;
         }
 
-        foreach ($plunk as $email => $subscribed) {
-            if ($subscribed && !isset($seen[$email])) {
-                $mismatches[] = sprintf('%s subscribed in Plunk but not in PS', EmailMask::mask($email));
-            }
-        }
-
-        return $mismatches;
-    }
-
-    private function countPsSubscribed(int $idShop): int
-    {
-        $db = \Db::getInstance();
-
-        return (int) $db->getValue(
-            'SELECT
-                (SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer` WHERE `id_shop` = ' . (int) $idShop . ' AND `newsletter` = 1) +
-                (SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription` WHERE `id_shop` = ' . (int) $idShop . ' AND `active` = 1)'
-        );
-    }
-
-    /**
-     * @return int[]
-     */
-    private function allShopIds(): array
-    {
-        return array_map('intval', array_column((array) \Shop::getShops(false), 'id_shop'));
+        return false;
     }
 }

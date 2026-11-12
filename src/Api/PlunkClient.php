@@ -1,223 +1,170 @@
 <?php
 
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
+ * Thin curl client for the self-hosted Plunk API.
  *
- * Minimal HTTP client for the Plunk API. Uses ext-curl, no external
- * dependencies. TLS verification is always enabled.
- *
- * @author  TV Parkas
- * @license MIT
+ * Only used by the outbox worker and console commands - never called
+ * synchronously in a shopper-facing request.
  */
-
-declare(strict_types=1);
 
 namespace PlunkConnect\Api;
 
-class PlunkClient
+use PlunkConnect\Config;
+
+final class PlunkClient
 {
-    public const CONNECT_TIMEOUT_SECONDS = 3;
-    public const TOTAL_TIMEOUT_SECONDS = 10;
+    public const CONNECT_TIMEOUT = 3;
+    public const TOTAL_TIMEOUT = 10;
 
-    /** @var string Base API URL, e.g. https://api.mk.tvparkas.lt (no trailing slash) */
-    private $baseUrl;
+    private string $baseUrl;
+    private ?string $publicKey;
+    private ?string $secretKey;
 
-    /** @var string Public key pk_... (used for /v1/track) */
-    private $publicKey;
-
-    /** @var string Secret key sk_... (used for /contacts etc.) */
-    private $secretKey;
-
-    public function __construct(string $baseUrl, string $publicKey = '', string $secretKey = '')
+    public function __construct(?int $idShop = null)
     {
-        $this->baseUrl = rtrim($baseUrl, '/');
-        $this->publicKey = $publicKey;
-        $this->secretKey = $secretKey;
+        $this->baseUrl = rtrim((string) Config::get(Config::API_URL, '', $idShop), '/');
+        $this->publicKey = (string) Config::get(Config::PUBLIC_KEY, '', $idShop);
+        $this->secretKey = (string) Config::get(Config::SECRET_KEY, '', $idShop);
     }
 
     /**
-     * POST /v1/track – event + contact upsert (public key).
-     *
-     * @param array<string, mixed> $payload {event, email, subscribed?, data?}
-     * @param string $idempotencyKey UUID from the outbox row
+     * POST /v1/track - event + contact upsert, public key.
      */
-    public function track(array $payload, string $idempotencyKey): PlunkResponse
+    public function track(array $body, string $idempotencyKey): array
     {
-        return $this->request('POST', '/v1/track', $payload, $this->publicKey, $idempotencyKey);
+        return $this->request('POST', '/v1/track', $this->publicKey, $body, $idempotencyKey);
     }
 
     /**
-     * POST /contacts – contact upsert (secret key).
-     *
-     * @param array<string, mixed> $payload {email, data?, subscribed?}
-     * @param string $idempotencyKey
+     * POST /contacts - contact upsert without an event, secret key.
      */
-    public function upsertContact(array $payload, string $idempotencyKey): PlunkResponse
+    public function upsertContact(array $body, string $idempotencyKey): array
     {
-        return $this->request('POST', '/contacts', $payload, $this->secretKey, $idempotencyKey);
+        return $this->request('POST', '/contacts', $this->secretKey, $body, $idempotencyKey);
     }
 
     /**
-     * POST /contacts/lookup – bulk existence check, max 500 emails.
-     *
-     * @param array<int, string> $emails
-     *
-     * @return PlunkResponse body: {found: string[], notFound: string[]}
+     * POST /contacts/lookup - find a contact by email. Returns ['id'=>..] or null.
      */
-    public function lookupContacts(array $emails): PlunkResponse
+    public function lookupContact(string $email): ?array
     {
-        return $this->request('POST', '/contacts/lookup', ['emails' => array_values($emails)], $this->secretKey);
-    }
-
-    /**
-     * GET /contacts – cursor pagination, used by the reconcile command and
-     * by the GDPR delete flow (search by email).
-     *
-     * @param int $limit Max 100
-     * @param string|null $cursor Opaque nextCursor from a previous page
-     * @param array<string, mixed> $query Extra query params: search, status, sort, dir
-     */
-    public function listContacts(int $limit = 100, ?string $cursor = null, array $query = []): PlunkResponse
-    {
-        $params = array_merge(['limit' => min($limit, 100)], $query);
-        if (null !== $cursor && '' !== $cursor) {
-            $params['cursor'] = $cursor;
-        }
-
-        return $this->request('GET', '/contacts?' . http_build_query($params), null, $this->secretKey);
-    }
-
-    /**
-     * Finds a single contact by exact email via GET /contacts?search=.
-     * The search endpoint is a fuzzy match, so the result list is filtered
-     * for an exact (case-insensitive) email match.
-     *
-     * @return array<string, mixed>|null The contact array (has 'id') or null
-     */
-    public function findContactByEmail(string $email): ?array
-    {
-        $response = $this->listContacts(100, null, ['search' => $email]);
-        if (!$response->isSuccess() || !is_array($this->extractItems($response))) {
-            return null;
-        }
-
-        $normalized = function_exists('mb_strtolower') ? mb_strtolower($email) : strtolower($email);
-        foreach ($this->extractItems($response) as $contact) {
-            $candidate = isset($contact['email']) ? (string) $contact['email'] : '';
-            $candidateNorm = function_exists('mb_strtolower') ? mb_strtolower($candidate) : strtolower($candidate);
-            if ($candidateNorm === $normalized) {
-                return $contact;
-            }
+        $response = $this->lookupContactResponse($email);
+        if (($response['status'] ?? 0) === 200 && is_array($response['body'])) {
+            return $response['body'];
         }
 
         return null;
     }
 
     /**
-     * DELETE /contacts/:id – GDPR erasure.
+     * Raw lookup response (with status) so callers can tell "not found"
+     * apart from "lookup failed".
      */
-    public function deleteContact(string $contactId, string $idempotencyKey): PlunkResponse
+    public function lookupContactResponse(string $email): array
     {
-        return $this->request('DELETE', '/contacts/' . rawurlencode($contactId), null, $this->secretKey, $idempotencyKey);
+        return $this->request('POST', '/contacts/lookup', $this->secretKey, ['email' => $email]);
     }
 
     /**
-     * Cheap connectivity check used by the "Test connection" button:
-     * GET /contacts?limit=1 authenticated with the secret key.
+     * DELETE /contacts/:id - GDPR erasure, secret key.
      */
-    public function testConnection(): PlunkResponse
+    public function deleteContact(string $contactId): array
     {
-        return $this->request('GET', '/contacts?limit=1', null, $this->secretKey);
+        return $this->request('DELETE', '/contacts/' . rawurlencode($contactId), $this->secretKey, null);
     }
 
     /**
-     * @param array<string, mixed>|string|null $body
+     * GET /contacts - cursor-paginated listing used by the reconcile command.
      */
-    private function request(string $method, string $path, $body, string $bearerToken, ?string $idempotencyKey = null): PlunkResponse
+    public function listContacts(?string $cursor = null, int $limit = 250): array
     {
-        $ch = curl_init($this->baseUrl . $path);
-        if (false === $ch) {
-            return new PlunkResponse(0, null, '', null, 'curl_init failed');
+        $query = '?limit=' . $limit . ($cursor ? '&cursor=' . rawurlencode($cursor) : '');
+
+        return $this->request('GET', '/contacts' . $query, $this->secretKey, null);
+    }
+
+    /**
+     * Low-level request helper.
+     *
+     * @return array{status:int,body:?array,retryAfter:?int,error:?string,raw:string}
+     */
+    public function request(string $method, string $path, ?string $bearer, ?array $body = null, ?string $idempotencyKey = null): array
+    {
+        if ('' === $this->baseUrl || !$bearer) {
+            return ['status' => 0, 'body' => null, 'retryAfter' => null, 'error' => 'not_configured', 'raw' => ''];
         }
 
         $headers = [
             'Accept: application/json',
-            'Content-Type: application/json',
-            'User-Agent: PlunkConnect-PrestaShop/1.0',
+            'Authorization: Bearer ' . $bearer,
         ];
-        if ('' !== $bearerToken) {
-            $headers[] = 'Authorization: Bearer ' . $bearerToken;
+        if (null !== $body) {
+            $headers[] = 'Content-Type: application/json';
         }
-        if (null !== $idempotencyKey && '' !== $idempotencyKey) {
+        if (null !== $idempotencyKey) {
             $headers[] = 'Idempotency-Key: ' . $idempotencyKey;
         }
 
+        $ch = curl_init($this->baseUrl . $path);
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
             CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT_SECONDS,
-            CURLOPT_TIMEOUT => self::TOTAL_TIMEOUT_SECONDS,
+            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
+            CURLOPT_TIMEOUT => self::TOTAL_TIMEOUT,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_HEADER => true,
         ]);
-
         if (null !== $body) {
-            $json = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            if (false === $json) {
-                curl_close($ch);
-
-                return new PlunkResponse(0, null, '', null, 'json_encode failed');
-            }
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $json);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         }
 
         $raw = curl_exec($ch);
-        $retryAfter = null;
-
+        $error = null;
+        $status = 0;
+        $headerSize = 0;
         if (false === $raw) {
-            $error = curl_error($ch);
-            $errno = curl_errno($ch);
-            curl_close($ch);
-
-            return new PlunkResponse(0, null, '', null, 'curl error ' . $errno . ': ' . $error);
+            $error = 'curl: ' . curl_error($ch);
+        } else {
+            $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         }
-
-        $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-        $statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        $headerText = substr($raw, 0, $headerSize);
-        $rawBody = substr($raw, $headerSize);
         curl_close($ch);
 
-        if (429 === $statusCode && preg_match('/^Retry-After:\s*(\d+)/mi', $headerText, $m)) {
+        $responseHeaders = false !== $raw ? substr($raw, 0, $headerSize) : '';
+        $rawBody = false !== $raw ? substr($raw, $headerSize) : '';
+        $decoded = json_decode((string) $rawBody, true);
+        $retryAfter = null;
+        if (preg_match('/^Retry-After:\s*(\d+)/mi', $responseHeaders, $m)) {
             $retryAfter = (int) $m[1];
         }
 
-        $decoded = json_decode($rawBody, true);
-
-        return new PlunkResponse($statusCode, is_array($decoded) ? $decoded : null, $rawBody, $retryAfter);
+        return [
+            'status' => $status,
+            'body' => is_array($decoded) ? $decoded : null,
+            'retryAfter' => $retryAfter,
+            'error' => $error,
+            'raw' => is_string($rawBody) ? $rawBody : '',
+        ];
     }
 
     /**
-     * Contact list responses may be shaped {contacts: [...]} or {data: [...]}
-     * depending on the Plunk version; normalize to a plain array.
-     *
-     * @return array<int, array<string, mixed>>|null
+     * Admin "test connection" action. Checks TLS reachability only - no
+     * contact data is sent.
      */
-    private function extractItems(PlunkResponse $response): ?array
+    public function ping(): array
     {
-        if (!is_array($response->body)) {
-            return null;
+        if ('' === $this->baseUrl) {
+            return ['ok' => false, 'message' => 'API URL not configured'];
         }
-        foreach (['contacts', 'data', 'items', 'results'] as $key) {
-            if (isset($response->body[$key]) && is_array($response->body[$key])) {
-                return $response->body[$key];
-            }
-        }
+        $result = $this->request('GET', '/', $this->publicKey ?: 'ping', null);
 
-        return is_array($response->body) && array_keys($response->body) === range(0, count($response->body) - 1)
-            ? $response->body
-            : null;
+        return [
+            'ok' => $result['status'] > 0,
+            'message' => $result['status'] > 0
+                ? 'HTTP ' . $result['status']
+                : ($result['error'] ?: 'unreachable'),
+        ];
     }
 }

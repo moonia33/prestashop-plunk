@@ -15,7 +15,7 @@ jobs:
                   php-version: '8.1'
                   extensions: curl, mbstring
             - name: PHP lint
-              run: find plunkconnect -name '*.php' -not -path '*/vendor/*' -print0 | xargs -0 -n1 php -l
+              run: find . -name '*.php' -not -path '*/vendor/*' -print0 | xargs -0 -n1 php -l
 
     phpstan:
         runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
             - working-directory: .
               run: composer install --no-interaction --no-progress
             - working-directory: .
-              run: ./vendor/bin/phpunit
+              run: ./vendor/bin/phpunit -c phpunit.xml.dist
 
     cs-fixer:
         runs-on: ubuntu-latest

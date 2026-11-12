@@ -1,30 +1,37 @@
 <?php
 
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
- *
- * PII masking for logs: "jonas@gmail.com" -> "j***@gmail.com".
- *
- * @author  TV Parkas
- * @license MIT
+ * PII masking helpers for logs and error messages.
  */
-
-declare(strict_types=1);
 
 namespace PlunkConnect\Util;
 
-class EmailMask
+final class EmailMask
 {
-    public static function mask(string $email): string
+    /**
+     * l***@gmail.com style masking. Never log a raw address.
+     */
+    public static function mask(?string $email): string
     {
-        $atPos = strrpos($email, '@');
-        if (false === $atPos || 0 === $atPos) {
-            return '***';
+        if (!$email || !strpos($email, '@')) {
+            return '(none)';
         }
+        [$local, $domain] = explode('@', $email, 2);
+        $first = '' !== $local ? $local[0] : '*';
 
-        $local = substr($email, 0, $atPos);
-        $domain = substr($email, $atPos);
+        return $first . '***@' . $domain;
+    }
 
-        return substr($local, 0, 1) . '***' . $domain;
+    /**
+     * Mask every email-looking substring in a message before persisting it
+     * to outbox.last_error.
+     */
+    public static function scrub(string $message): string
+    {
+        return (string) preg_replace_callback(
+            '/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/',
+            fn (array $m) => self::mask($m[0]),
+            $message
+        );
     }
 }

@@ -1,133 +1,115 @@
-# plunkconnect – PrestaShop ↔ Plunk modulis
+# Plunk Connect (`plunkconnect`)
 
-PrestaShop modulis, kuris pakeičia Newsman (`newsmanapp`, `newsmancoupons`) ir jungia parduotuvę su self-hosted Plunk instancija (pvz. `https://api.mk.tvparkas.lt`). Bendras modulis – visa parduotuvei specifika konfigūruojama admin'e.
+PrestaShop modulis, jungiantis parduotuvę su self-hosted Plunk (pakeičia `newsmanapp` + `newsmancoupons`).
+PrestaShop module connecting a shop to a self-hosted Plunk instance (replaces `newsmanapp` + `newsmancoupons`).
 
-**Statusas: 1 etapas** – skeletas + naujienlaiškio prenumeratos (double opt-in, webhook, backfill, GDPR).
+- **Suderinamumas / Compatibility:** PrestaShop **8.1 – 9.x**, PHP **>= 8.1**, multistore (konfigūracija per parduotuvę / per-shop configuration).
+- **Be BZ specifikos / Shop-agnostic:** viskas konfigūruojama per admin'ą / everything is configured in the back office.
 
-## Kaip tai veikia
+---
 
-- **Niekada jokio sinchroninio HTTP kvietimo pirkėjo užklausoje.** Visi siuntimai eina per `ps_plunk_outbox` lentelę ir atskirą worker'į – Plunk neveikimas nepaveikia parduotuvės greičio.
-- Hook'ai tik įrašo eilutę į outbox (< 2 ms). Worker'is siunčia į Plunk su `Idempotency-Key`, `Retry-After` ir eksponentiniu retry.
-- Multistore: visa konfigūracija saugoma per parduotuvę (`id_shop`) – kiekviena parduotuvė gali turėti atskirus Plunk projektus/raktus.
-- **`ru` kalba niekada nesiunčiama** – `ru` kontaktams taikoma konfigūruojama fallback locale (numatyta `lt`).
+## LT
 
-## Diegimas
+### Diegimas
 
-1. Repozitoriją nuklonuoti į `modules/` kaip `plunkconnect`: `git clone https://github.com/moonia33/prestashop-plunk.git modules/plunkconnect` (repo šaknis = modulio šaknis, kaip įprasta PrestaShop moduliams).
-2. Admin → Modules → Module Manager → įdiegti **Plunk Connect**.
-3. Modulio konfigūracijoje (kontekste – konkreti parduotuvė):
-   - **Plunk API URL**, **pk_**, **sk_** raktai → „Išsaugoti“ → „Tikrinti ryšį“.
-   - Įjungti **Naujienlaiškio sinchronizaciją** (ir **Double opt-in**, jei Plunk'e sukonfigūruotas patvirtinimo workflow).
-   - Peržiūrėti sugeneruotus tokenus (webhook/cron/feed) – jie reikalingi Plunk workflow ir crontab'e.
-   - Kalbų žemėlapis: jei id_lang nesusietas, imamas `iso_code`; `ru` visada fallback'ina.
-4. Uždėti cron'ą (žr. žemiau).
+1. Nukopijuokite `plunkconnect/` į `modules/` (arba zip→Moduliai→Įkelti modulį). Composer'io nereikia – yra integruotas PSR-4 autoloader'is (`autoload.php`); jei paleisite `composer install`, bus naudojamas `vendor/autoload.php`.
+2. Įdiekite per *Moduliai → Module Manager* arba `php bin/console prestashop:module install plunkconnect`.
+3. Modulis gali veikti kartu su `newsmanapp` perėjimo laikotarpiui – konfliktų nėra.
 
-Modulis nieko nesiunčia, kol nėra API URL + raktų ir neįjungta funkcija.
+### Konfigūracija (admin)
 
-## Cron / worker'is
+| Laukas | Aprašymas |
+|---|---|
+| Plunk API URL | pvz. `https://api.mk.example.lt` |
+| Public key `pk_…` | `POST /v1/track` |
+| Secret key `sk_…` | `/contacts`, lookup, delete |
+| Webhook secret | HMAC pasirašymui (webhook, coupon, restorecart, `pk_e`) |
+| Feed token | katalogo feed ir gyvų produktų endpointai |
+| Cron token | `/module/plunkconnect/cron?token=…` |
+| Kalbų žemėlapis | `id_lang` → `lt/lv/et/en/pl`; `ru` → fallback (`ru` niekada tikslas negali būti) |
+| Būsenų žemėlapis | `OrderState` → `paid/shipped/delivered/cancelled/refunded` |
+| Funkcijų jungikliai | prenumeratos, double opt-in, peržiūros, krepšelis, užsakymai, feed, kuponai, back-in-stock, `?pk_e=` |
+| `consentSource`, `shopCode` | siunčiami kiekviename payload'e |
 
-Pirmenybė – CLI (kiekvieną minutę):
+### Cron (privaloma)
 
-```bash
-* * * * * cd /path/to/shop && php bin/console plunkconnect:outbox:process >> /dev/null 2>&1
+Jokio sinchroninio HTTP pirkėjo užklausoje – viskas eina per `PREFIX_plunk_outbox` ir worker'į:
+
+```cron
+* * * * * php /path/bin/console plunkconnect:outbox:process
 ```
 
-Fallback be CLI – HTTP endpoint (rodomas modulio nustatymuose):
+Atsarginis variantas be CLI: `GET /module/plunkconnect/cron?token=<cron token>` kas minutę.
 
-```bash
-* * * * * curl -s "https://shop.example/module/plunkconnect/cron?token=<cron token>" > /dev/null
-```
+### Endpointai
 
-Worker'is: iki 200 žinučių per paleidimą, ≤ ~50 s, ≤ 20 req/s. `sent` eilutės senesnės nei 7 d. trinamos (`--prune` arba automatiškai ~1% HTTP run'ų).
-
-## Plunk pusės konfigūracija (1 etapas)
-
-### Double opt-in workflow (rekomenduojama)
-
-1. Workflow trigger: įvykis `newsletter.signup_requested`.
-2. `SEND_EMAIL` žingsnis: patvirtinimo laiškas su nuoroda `{{subscribeUrl}}`.
-3. Paspaudus, Plunk pats nustato `subscribed=true` ir sukuria `contact.subscribed` įvykį.
-
-### Webhook atgal į parduotuvę
-
-Workflow su trigger `contact.subscribed` **ir** `contact.unsubscribed` (du workflow'ai), juose – `WEBHOOK` žingsnis:
-
-- URL: `https://shop.example/module/plunkconnect/webhook`
-- Method: `POST`
-- Headers: `Authorization: Bearer <webhook secret>` (tokenas – modulio nustatymuose)
-- Body (gali būti default arba custom):
-
-```json
-{"email": "{{email}}", "subscribed": true}
-```
-
-arba `{"email": "{{email}}", "event": "contact.unsubscribed"}`.
-
-Modulis priima visas formas: `{"contact":{"email","subscribed"}}` (Plunk default), `{"email","subscribed"}`, `{"email","event":"contact.*"}`.
-
-> **Kodėl Bearer, o ne HMAC?** Patikrinta `useplunk/plunk@next` (`WorkflowExecutionService::executeWebhook`): WEBHOOK žingsnio antraštės renderinamos kaip statiniai `{{var}}` šablonai – HMAC parašo jis suskaičiuoti negali. Modulis vis tiek priima ir HMAC variantą (`X-Plunk-Timestamp` + `X-Plunk-Signature = hex(HMAC_SHA256(secret, ts+"."+body))`, ±300 s), jei siuntėjas mokėtų jį formuoti.
-
-> **Kuponams (4 etapas, nauja spec):** numatyti du būdai. **A.** Kupono taisyklės admin'e – modulis pats sukuria `CartRule` ir ideda kaip non-persistent `coupon {code, validUntil, value, type}` į įvykį (pvz. `order.delivered`). **B.** `POST /module/plunkconnect/coupon` su `Authorization: Bearer <coupon secret>` (atskiras tokenas, Plunk WEBHOOK žingsnio `saveResponseAs` grąžina `{"code", "validUntil", "value", "type", "minAmount"}` tolesniems šablonams). Parametrai imami iš modulio taisyklės `rule`, ne iš užklausos. Kuponai: unikalus kodas (prefiksas + 8 simboliai be `0/O/1/I`), `quantity=1`, `quantity_per_user=1`, `id_customer` registruotiems; saugomi `PREFIX_plunk_coupon`, nepanaudoti trinami `plunkconnect:coupons:cleanup`.
-
-## Įvykiai (1 etapas)
-
-| Įvykis | Kada | `subscribed` | `data` |
+| Metodas | Kelias | Auth | Paskirtis |
 |---|---|---|---|
-| `newsletter.signup_requested` | Naujas prenumeratorius, DOI įjungtas | `false` | `locale`, `source:'prestashop'`, `consentSource`, `consentRequestedAt`, `consentIp`, `consentReferer`, `shopCode`, `firstName?`, `lastName?`, `customerId?` |
-| `newsletter.subscribed` | Prenumerata, DOI išjungtas | `true` | tie patys |
-| `newsletter.unsubscribed` | Atsisakyta PS pusėje | `false` | `locale`, `consentSource:'website_unsubscribe'`, `shopCode` |
+| POST | `/module/plunkconnect/webhook` | `X-Plunk-Timestamp` + `X-Plunk-Signature` (HMAC `timestamp + "." + rawBody`, ±300 s) arba `Authorization: Bearer <webhook secret>` | `contact.subscribed` / `contact.unsubscribed` → `ps_customer.newsletter`, `ps_emailsubscription.active` |
+| GET | `/module/plunkconnect/cron?token=…` | token | outbox worker + valymas |
+| GET | `/module/plunkconnect/feed/products?lang=lt&cursor=&limit=&updated_since=` | `Bearer <feed token>` | katalogo feed (cursor pagal `id_product`, ≤500/puslapis) |
+| GET | `/module/plunkconnect/feed/categories?lang=lt` | `Bearer <feed token>` | kategorijų feed |
+| GET | `/module/plunkconnect/products?ids=1,2&lang=lt` | `Bearer <feed token>` | gyva kaina/likutis (≤50 ID; neaktyvios → `available:false`) |
+| GET | `/module/plunkconnect/recommendations?product_ids=…&lang=lt&limit=6` | `Bearer <feed token>` | priedai + kategorijos best selleriai, tik turimos |
+| POST | `/module/plunkconnect/coupon` | HMAC kaip webhook | vienkartinis `CartRule` → `{code, validUntil}`; kodas ir galiojimas įrašomi kontaktui (`lastCouponCode`, `lastCouponValidUntil`) |
+| GET | `/module/plunkconnect/restorecart?c=&e=&t=` | HMAC nuoroda (30 d.) | atkuria svečio krepšelį; registruoto – per prisijungimą |
 
-Šaltiniai: `ps_emailsubscription` forma (+ verification confirm), paskyros sukūrimas su newsletter varnele, `customer.newsletter` perjungimas paskyroje/checkout'e, svečio atsisakymas per formą (tikrinama shutdown funkcija).
+### Įvykiai (visi per outbox → `POST /v1/track`)
 
-## Komandos
+`newsletter.signup_requested` / `newsletter.subscribed` / `newsletter.unsubscribed`,
+`customer.registered`, `product.viewed` (30 min debounce), `category.viewed`,
+`cart.updated` (sutraukimas per `cart:<id>`), `order.placed`, `order.{paid,shipped,delivered,cancelled,refunded}`,
+`product.back_in_stock`.
 
-```bash
-# outbox worker
-php bin/console plunkconnect:outbox:process [--limit=200] [--max-seconds=50] [--shop=1] [--prune]
+Persistent `data` – tik maži skalai (`locale`, `shopCode`, `cartItemsCount`, `ordersCount`, `totalSpent`, …).
+Masyvai (`product`, `cart`, `order`) siunčiami kaip `{value:…, persistent:false}` → prieinami workflow per `{{event.*}}`.
 
-# pradinis perkėlimas (subscribers, atsiradę po Newsman eksporto)
-php bin/console plunkconnect:subscribers:backfill --since=2026-11-12 --dry-run
-php bin/console plunkconnect:subscribers:backfill --since=2026-11-12
+### Konsolės komandos
 
-# naktinis suderinimas – TIK raportuoja neatitikimus
-php bin/console plunkconnect:subscribers:reconcile [--shop=1]
+- `plunkconnect:outbox:process [--limit=200] [--max-seconds=50]`
+- `plunkconnect:subscribers:backfill --since=YYYY-MM-DD [--dry-run]` – `contacts_ifnew`: esamiems kontaktams `subscribed` nekeičia
+- `plunkconnect:subscribers:reconcile` – tik raportuoja neatitikimus
+
+### Pastabos Plunk workflow'ams
+
+- WEBHOOK žingsnis: jei Plunk nemoka skaičiuoti HMAC, naudokite statinę antraštę `Authorization: Bearer <webhook secret>`.
+- Nuorodos laiškuose gali turėti `?pk_e=<token>` (token = `base64url(email).hmac(email)`) – modulis įsimins lankytoją `plunk_id` cookie (365 d).
+- `{{contact.lastCouponCode}}` – kuponas, sukurtas `/coupon` endpoint'o.
+
+---
+
+## EN
+
+### Install
+
+1. Copy `plunkconnect/` to `modules/` (or upload the zip). Composer is optional – a bundled PSR-4 autoloader is used when `vendor/` is absent.
+2. Install via *Modules → Module Manager* or `php bin/console prestashop:module install plunkconnect`.
+3. Safe to run alongside `newsmanapp` during migration.
+
+### Cron (required)
+
+No synchronous HTTP in shopper requests – everything goes through `PREFIX_plunk_outbox`:
+
+```cron
+* * * * * php /path/bin/console plunkconnect:outbox:process
 ```
 
-Backfill siunčia `POST /contacts` **be `subscribed`** – esamų kontaktų būsena nekeičiama, nauji tampa subscribed pagal Plunk nutylėjimą.
+Fallback without CLI: `GET /module/plunkconnect/cron?token=<cron token>` every minute.
 
-## Endpoint'ai
+### Endpoints
 
-| Endpoint | Metodas | Auth |
-|---|---|---|
-| `/module/plunkconnect/webhook` | POST | `Authorization: Bearer <webhook secret>` arba HMAC |
-| `/module/plunkconnect/cron?token=…` | GET | `token` = cron token |
+See the LT table above – paths, auth and behaviour are identical.
 
-## GDPR
+### Events (all via outbox → `POST /v1/track`)
 
-- `actionDeleteGDPRCustomer` → outbox `delete` žinutė (worker'is daro `GET /contacts?search=` + `DELETE /contacts/:id`).
-- `actionExportGDPRData` → JSON su tuo, kas siunčiama į Plunk.
+`newsletter.signup_requested` / `newsletter.subscribed` / `newsletter.unsubscribed`,
+`customer.registered`, `product.viewed`, `category.viewed`, `cart.updated`,
+`order.placed`, `order.{paid,shipped,delivered,cancelled,refunded}`, `product.back_in_stock`.
 
-## Saugumas
+Persistent `data` holds small scalars only; arrays travel as `{value:…, persistent:false}` → `{{event.*}}`.
 
-- Slapto raktų (pk_, sk_, webhook/cron/feed token) reikšmės saugomos `ps_configuration`, admin'e rodomos užmaskuotos.
-- El. paštai log'uose maskuojami (`j***@gmail.com`).
-- Webhook/cron – `hash_equals` tikrinimas; HMAC su ±300 s langu.
-- TLS verifikacija visada įjungta; connect 3 s / total 10 s timeout'ai.
+### Notes for Plunk workflows
 
-## Vystymas
-
-```bash
-cd plunkconnect
-composer install
-./vendor/bin/phpunit          # 34 testai
-./vendor/bin/phpstan analyse  # level 6
-./vendor/bin/php-cs-fixer fix
-```
-
-Struktūra: `src/` – PSR-4 `PlunkConnect\`, `controllers/front/` – webhook+cron, `src/Command/` – bin/console komandos, `sql/` – schema, `translations/` – LT/EN XLF.
-
-## Planas
-
-- **2 etapas**: elgsenos įvykiai (`product.viewed`, `cart.updated`+`restorecart`, `order.*`), kontaktų identifikavimas (`plunk_id` cookie), consent cookie tikrinimas.
-- **3 etapas**: katalogo feed (`/feed/products`, `/feed/categories`), gyvi produktų duomenys, rekomendacijos.
-- **4 etapas**: kuponai (`/coupon`, vienkartiniai `CartRule`), back-in-stock.
+- If the WEBHOOK step cannot compute HMAC, use the static `Authorization: Bearer <webhook secret>` fallback.
+- Email links may carry `?pk_e=<token>` (token = `base64url(email).hmac(email)`) – the module stores a `plunk_id` cookie (365 d).
+- `{{contact.lastCouponCode}}` is set by the `/coupon` endpoint.

@@ -1,277 +1,229 @@
 <?php
 
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
+ * Outbox worker. Called by `plunkconnect:outbox:process`, the cron front
+ * controller and the actionCronJob hook.
  *
- * Drains the outbox: claims batches, calls the Plunk API, applies retry /
- * dead-letter / rate-limit rules. Runs from bin/console, the cron front
- * controller or actionCronJob.
- *
- * @author  TV Parkas
- * @license MIT
+ * Claiming: ids are selected, then a single guarded UPDATE marks them
+ * `processing` with a unique tag - two concurrent workers cannot grab the
+ * same row without MariaDB-version-specific SKIP LOCKED syntax.
  */
-
-declare(strict_types=1);
 
 namespace PlunkConnect\Outbox;
 
 use PlunkConnect\Api\PlunkClient;
-use PlunkConnect\Api\PlunkResponse;
-use PlunkConnect\Config\ModuleConfiguration;
 
-class OutboxProcessor
+final class OutboxProcessor
 {
-    /** Max wall-clock seconds per run. */
-    public const MAX_RUNTIME_SECONDS = 50;
-
-    /** Max requests per second to Plunk. */
-    public const MAX_REQUESTS_PER_SECOND = 20;
-
-    /** Outbox rows processed per run. */
-    public const MAX_MESSAGES_PER_RUN = 200;
-
-    /** Claim chunk size. */
-    private const CLAIM_CHUNK = 50;
-
-    /** @var ModuleConfiguration */
-    private $config;
-
-    /** @var OutboxRepository */
-    private $repository;
-
-    /** @var RetryPolicy */
-    private $retryPolicy;
-
-    /** @var callable|null PSR-3-ish logger fn(string, string) */
-    private $logger;
-
-    public function __construct(
-        ModuleConfiguration $config,
-        ?OutboxRepository $repository = null,
-        ?RetryPolicy $retryPolicy = null,
-        ?callable $logger = null,
-    ) {
-        $this->config = $config;
-        $this->repository = $repository ?: new OutboxRepository();
-        $this->retryPolicy = $retryPolicy ?: new RetryPolicy();
-        $this->logger = $logger;
-    }
+    /** Exponential backoff in seconds: 1m, 5m, 15m, 1h, 6h. */
+    public const RETRY_DELAYS = [60, 300, 900, 3600, 21600];
+    public const MAX_ATTEMPTS = 8;
+    private const REQUEST_DELAY_US = 50000; // ~20 req/s
 
     /**
-     * Processes up to $maxMessages outbox rows within the time budget.
-     *
-     * @return array{processed:int, sent:int, retried:int, dead:int}
+     * @return array{claimed:int,sent:int,retried:int,dead:int}
      */
-    public function process(
-        int $maxMessages = self::MAX_MESSAGES_PER_RUN,
-        int $maxSeconds = self::MAX_RUNTIME_SECONDS,
-        ?int $idShop = null,
-    ): array {
-        $stats = ['processed' => 0, 'sent' => 0, 'retried' => 0, 'dead' => 0];
-        $startedAt = microtime(true);
-        $locker = gethostname() . '-' . getmypid() . '-' . substr(bin2hex(random_bytes(6)), 0, 12);
+    public function process(int $limit = 200, int $maxSeconds = 50): array
+    {
+        $stats = ['claimed' => 0, 'sent' => 0, 'retried' => 0, 'dead' => 0];
+        $deadline = microtime(true) + $maxSeconds;
+        $table = _DB_PREFIX_ . Outbox::TABLE;
+        $db = \Db::getInstance();
 
-        $this->repository->releaseStaleProcessing();
-        $this->repository->requeueDueFailures();
+        $ids = array_map('intval', array_column($db->executeS(
+            'SELECT `id_outbox` FROM `' . $table . '`
+             WHERE `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\'
+               AND `next_attempt_at` <= NOW()
+             ORDER BY `id_outbox` ASC
+             LIMIT ' . max(1, $limit)
+        ) ?: [], 'id_outbox'));
 
-        $minInterval = 1.0 / self::MAX_REQUESTS_PER_SECOND;
-        $lastRequestAt = 0.0;
+        // Rows stuck in `processing` (crashed worker) become pending again.
+        $db->execute(
+            'UPDATE `' . $table . '`
+             SET `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\', `locked_by` = NULL
+             WHERE `status` = \'' . pSQL(Outbox::STATUS_PROCESSING) . '\'
+               AND `date_upd` < DATE_SUB(NOW(), INTERVAL 10 MINUTE)'
+        );
 
-        while ($stats['processed'] < $maxMessages
-            && (microtime(true) - $startedAt) < $maxSeconds
-        ) {
-            $batch = $this->repository->claimBatch(
-                min(self::CLAIM_CHUNK, $maxMessages - $stats['processed']),
-                $locker,
-                $idShop
-            );
+        if (!$ids) {
+            return $stats;
+        }
 
-            if (empty($batch)) {
+        $tag = uniqid('w', true);
+        $db->execute(
+            'UPDATE `' . $table . '`
+             SET `status` = \'' . pSQL(Outbox::STATUS_PROCESSING) . '\',
+                 `locked_by` = \'' . pSQL($tag) . '\',
+                 `date_upd` = NOW()
+             WHERE `id_outbox` IN (' . implode(',', $ids) . ')
+               AND `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\''
+        );
+
+        $rows = $db->executeS(
+            'SELECT * FROM `' . $table . '`
+             WHERE `locked_by` = \'' . pSQL($tag) . '\' AND `status` = \'' . pSQL(Outbox::STATUS_PROCESSING) . '\''
+        ) ?: [];
+
+        $stats['claimed'] = count($rows);
+        $clients = [];
+
+        foreach ($rows as $row) {
+            if (microtime(true) > $deadline) {
                 break;
             }
-
-            foreach ($batch as $row) {
-                if ($stats['processed'] >= $maxMessages
-                    || (microtime(true) - $startedAt) >= $maxSeconds
-                ) {
-                    // Give unprocessed rows of this chunk back.
-                    $this->releaseRow((int) $row['id_outbox']);
-                    continue;
-                }
-
-                // Rate limiting: sleep before the request if needed.
-                $elapsed = microtime(true) - $lastRequestAt;
-                if ($elapsed < $minInterval) {
-                    usleep((int) (($minInterval - $elapsed) * 1000000));
-                }
-                $lastRequestAt = microtime(true);
-
-                $this->processRow($row, (int) $row['id_shop'], $stats);
-                ++$stats['processed'];
+            $idShop = (int) $row['id_shop'];
+            if (!isset($clients[$idShop])) {
+                $clients[$idShop] = new PlunkClient($idShop);
             }
+            $result = $this->dispatch($clients[$idShop], $row);
+            $this->settle($row, $result, $stats);
+
+            usleep(self::REQUEST_DELAY_US);
         }
+
+        // Unclaimed leftovers (rows we lost to a race or the deadline) go
+        // back to pending so nothing stays stuck as `processing`.
+        $db->execute(
+            'UPDATE `' . $table . '`
+             SET `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\', `locked_by` = NULL
+             WHERE `locked_by` = \'' . pSQL($tag) . '\' AND `status` = \'' . pSQL(Outbox::STATUS_PROCESSING) . '\''
+        );
 
         return $stats;
     }
 
     /**
-     * Deletes 'sent' rows older than 7 days. Called periodically by cron.
+     * Route one outbox row to the right Plunk endpoint.
+     *
+     * @return array{status:int,retryAfter:?int,error:?string}
      */
-    public function prune(int $days = 7): int
+    private function dispatch(PlunkClient $client, array $row): array
     {
-        return $this->repository->pruneSent($days);
+        $payload = json_decode((string) $row['payload'], true);
+        if (!is_array($payload)) {
+            return ['status' => 400, 'retryAfter' => null, 'error' => 'invalid payload json'];
+        }
+
+        switch ($row['endpoint']) {
+            case 'track':
+                return $client->track($payload, $row['uuid']);
+
+            case 'contacts':
+                return $client->upsertContact($payload, $row['uuid']);
+
+            case 'contacts_ifnew':
+                // Backfill: do not change `subscribed` of an existing contact.
+                // A failed lookup is retried - it must not be treated as "not found".
+                $lookup = isset($payload['email'])
+                    ? $client->lookupContactResponse((string) $payload['email'])
+                    : ['status' => 400, 'retryAfter' => null, 'error' => 'missing email'];
+                $lookupStatus = (int) ($lookup['status'] ?? 0);
+                if (0 === $lookupStatus || $lookupStatus >= 500 || 429 === $lookupStatus) {
+                    return $lookup;
+                }
+                if (200 === $lookupStatus) {
+                    unset($payload['subscribed']);
+                }
+
+                return $client->upsertContact($payload, $row['uuid']);
+
+            case 'lookup_delete':
+                // GDPR erasure: resolve the contact id first, then delete.
+                $email = isset($payload['email']) ? (string) $payload['email'] : '';
+                $contact = '' !== $email ? $client->lookupContact($email) : null;
+                if (!is_array($contact)) {
+                    // 404/no contact = nothing to delete; treat as done.
+                    return ['status' => 200, 'retryAfter' => null, 'error' => null];
+                }
+                $contactId = (string) ($contact['id'] ?? '');
+
+                return $client->deleteContact($contactId);
+
+            default:
+                return ['status' => 400, 'retryAfter' => null, 'error' => 'unknown endpoint ' . $row['endpoint']];
+        }
     }
 
     /**
-     * @param array<string, mixed> $row
-     * @param array{processed:int, sent:int, retried:int, dead:int} $stats
+     * Success: 2xx (a repeated Idempotency-Key is rejected by Plunk and that
+     * still counts as delivered). 408/429 and 5xx retry; other 4xx die.
      */
-    private function processRow(array $row, int $idShop, array &$stats): void
+    private function settle(array $row, array $result, array &$stats): void
     {
-        $id = (int) $row['id_outbox'];
-        $endpoint = (string) $row['endpoint'];
-        $uuid = (string) $row['uuid'];
+        $status = (int) $result['status'];
         $attempts = (int) $row['attempts'] + 1;
+        $now = date('Y-m-d H:i:s');
+        $table = _DB_PREFIX_ . Outbox::TABLE;
+        $id = (int) $row['id_outbox'];
 
-        $payload = json_decode((string) $row['payload'], true);
-        if (!is_array($payload)) {
-            $this->repository->markFailed($id, 0, 'invalid JSON payload', true);
-            ++$stats['dead'];
-
-            return;
-        }
-
-        if (!$this->config->isConfigured($idShop)) {
-            // Keep for later: shop keys not set yet. Retry slowly.
-            $this->repository->markFailed($id, 3600, 'module not configured for shop', false);
-            ++$stats['retried'];
-
-            return;
-        }
-
-        $client = $this->config->createClient($idShop);
-
-        try {
-            $response = $this->dispatch($client, $endpoint, $payload, $uuid);
-        } catch (\Throwable $e) {
-            $response = new PlunkResponse(0, null, '', null, $e->getMessage());
-        }
-
-        if ($response->isSuccess() || $response->isIdempotencyConflict()) {
-            $this->repository->markSent($id);
+        if ($status >= 200 && $status < 300) {
+            \Db::getInstance()->execute(
+                'UPDATE `' . $table . '`
+                 SET `status` = \'' . pSQL(Outbox::STATUS_SENT) . '\', `attempts` = ' . $attempts . ',
+                     `locked_by` = NULL, `last_error` = NULL, `date_upd` = \'' . pSQL($now) . '\'
+                 WHERE `id_outbox` = ' . $id
+            );
             ++$stats['sent'];
 
             return;
         }
 
-        if ($response->isPermanentError()) {
-            $this->repository->markFailed($id, 0, $this->summarizeError($response), true);
+        $error = Outbox::scrubError(
+            $result['error'] ?: ('HTTP ' . $status . ' ' . \Tools::substr((string) ($result['raw'] ?? ''), 0, 300))
+        );
+        $retryable = 0 === $status || 408 === $status || 429 === $status || $status >= 500;
+
+        if (!$retryable || $attempts >= self::MAX_ATTEMPTS) {
+            \Db::getInstance()->execute(
+                'UPDATE `' . $table . '`
+                 SET `status` = \'' . pSQL(Outbox::STATUS_DEAD) . '\', `attempts` = ' . $attempts . ',
+                     `locked_by` = NULL, `last_error` = \'' . pSQL($error) . '\',
+                     `date_upd` = \'' . pSQL($now) . '\'
+                 WHERE `id_outbox` = ' . $id
+            );
             ++$stats['dead'];
-            $this->log('error', sprintf('Outbox #%d dead (HTTP %d): %s', $id, $response->statusCode, $this->summarizeError($response)));
 
             return;
         }
 
-        // Retryable: network error, 5xx, 408, 429.
-        if (!$this->retryPolicy->shouldRetry($attempts)) {
-            $this->repository->markFailed($id, 0, 'max attempts reached: ' . $this->summarizeError($response), true);
-            ++$stats['dead'];
-
-            return;
+        $delay = self::RETRY_DELAYS[min($attempts - 1, count(self::RETRY_DELAYS) - 1)];
+        if (429 === $status && !empty($result['retryAfter'])) {
+            $delay = max($delay, (int) $result['retryAfter']);
         }
+        $next = date('Y-m-d H:i:s', time() + $delay);
 
-        $delay = $response->isRateLimited() && null !== $response->retryAfter
-            ? max($response->retryAfter, 1)
-            : $this->retryPolicy->delayForAttempt($attempts);
-
-        $this->repository->markFailed($id, $delay, $this->summarizeError($response), false);
+        \Db::getInstance()->execute(
+            'UPDATE `' . $table . '`
+             SET `status` = \'' . pSQL(Outbox::STATUS_PENDING) . '\', `attempts` = ' . $attempts . ',
+                 `locked_by` = NULL, `last_error` = \'' . pSQL($error) . '\',
+                 `next_attempt_at` = \'' . pSQL($next) . '\', `date_upd` = \'' . pSQL($now) . '\'
+             WHERE `id_outbox` = ' . $id
+        );
         ++$stats['retried'];
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * Delete `sent` rows older than 7 days in batches of 1000.
      */
-    private function dispatch(PlunkClient $client, string $endpoint, array $payload, string $uuid): PlunkResponse
+    public function cleanup(int $batches = 5): int
     {
-        switch ($endpoint) {
-            case OutboxRepository::ENDPOINT_TRACK:
-                return $client->track($payload, $uuid);
-
-            case OutboxRepository::ENDPOINT_CONTACTS:
-                return $client->upsertContact($payload, $uuid);
-
-            case OutboxRepository::ENDPOINT_DELETE:
-                return $this->dispatchDelete($client, $payload, $uuid);
-        }
-
-        return new PlunkResponse(0, null, '', null, 'unknown endpoint: ' . $endpoint);
-    }
-
-    /**
-     * GDPR delete: resolve the contact id by email, then DELETE it.
-     * A missing contact counts as success (already gone).
-     *
-     * @param array<string, mixed> $payload
-     */
-    private function dispatchDelete(PlunkClient $client, array $payload, string $uuid): PlunkResponse
-    {
-        $email = isset($payload['email']) ? (string) $payload['email'] : '';
-        if ('' === $email) {
-            return new PlunkResponse(400, null, '', null, 'missing email');
-        }
-
-        $contact = $client->findContactByEmail($email);
-        if (null === $contact) {
-            return new PlunkResponse(204, null, '');
-        }
-
-        $id = isset($contact['id']) ? (string) $contact['id'] : '';
-        if ('' === $id) {
-            return new PlunkResponse(0, null, '', null, 'contact without id');
-        }
-
-        return $client->deleteContact($id, $uuid);
-    }
-
-    private function releaseRow(int $idOutbox): void
-    {
-        \Db::getInstance()->update(
-            OutboxRepository::TABLE,
-            [
-                'status' => \pSQL(OutboxRepository::STATUS_PENDING),
-                'locked_by' => ['type' => 'sql', 'value' => 'NULL'],
-            ],
-            '`id_outbox` = ' . (int) $idOutbox . ' AND `status` = \'' . \pSQL(OutboxRepository::STATUS_PROCESSING) . '\''
-        );
-    }
-
-    /**
-     * Error summary without PII: HTTP status + short body excerpt (Plunk
-     * error bodies contain codes, not contact data).
-     */
-    private function summarizeError(PlunkResponse $response): string
-    {
-        if (null !== $response->transportError) {
-            return mb_substr($response->transportError, 0, 200);
-        }
-
-        $summary = 'HTTP ' . $response->statusCode;
-        if (is_array($response->body)) {
-            foreach (['error', 'message', 'code'] as $key) {
-                if (isset($response->body[$key]) && is_scalar($response->body[$key])) {
-                    $summary .= ' ' . $response->body[$key];
-                    break;
-                }
+        $deleted = 0;
+        $table = _DB_PREFIX_ . Outbox::TABLE;
+        for ($i = 0; $i < $batches; ++$i) {
+            \Db::getInstance()->execute(
+                'DELETE FROM `' . $table . '`
+                 WHERE `status` = \'' . pSQL(Outbox::STATUS_SENT) . '\'
+                   AND `date_upd` < DATE_SUB(NOW(), INTERVAL 7 DAY)
+                 LIMIT 1000'
+            );
+            $affected = (int) \Db::getInstance()->Affected_Rows();
+            $deleted += $affected;
+            if ($affected < 1000) {
+                break;
             }
         }
 
-        return mb_substr($summary, 0, 300);
-    }
-
-    private function log(string $level, string $message): void
-    {
-        if (null !== $this->logger) {
-            call_user_func($this->logger, $level, $message);
-        }
+        return $deleted;
     }
 }

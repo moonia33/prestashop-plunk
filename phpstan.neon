@@ -3,11 +3,21 @@ parameters:
     paths:
         - src
         - controllers
-        - sql
         - plunkconnect.php
-    bootstrapFiles:
-        - tests/stubs/prestashop.php
+        - sql
     excludePaths:
-        - tests/*
         - vendor/*
-    treatPhpDocTypesAsCertain: false
+        - tests/*
+    # PrestaShop core classes (Context, Db, Configuration, Module, ...)
+    # come from the shop runtime; phpstan runs with prestashop/php-dev-tools
+    # inside a shop checkout where core is autoloadable.
+    checkMissingCallableSignature: false
+    bootstrapFiles:
+        - tests/stubs.php
+    ignoreErrors:
+        # Stub artefacts: stub properties are declared non-nullable while the
+        # real PrestaShop runtime can return null/false.
+        - '#on left side of \?\? is not nullable#'
+        - '#is always true#'
+        # Level-6 iterable-type requirements; tighten incrementally later.
+        - '#no value type specified in iterable type#'

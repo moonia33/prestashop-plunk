@@ -1,14 +1,16 @@
 <?php
 
-declare(strict_types=1);
 /**
- * PlunkConnect – Plunk email platform integration for PrestaShop.
- *
- * @author  TV Parkas
- * @license MIT
+ * Module uninstall SQL. Drops the outbox table; Plunk-side data is untouched.
  */
 $sql = [];
 
-$sql[] = 'DROP TABLE IF EXISTS `_DB_PREFIX_plunk_outbox`;';
+$sql[] = 'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'plunk_outbox`';
 
-return $sql;
+foreach ($sql as $query) {
+    if (!Db::getInstance()->execute($query)) {
+        return false;
+    }
+}
+
+return true;
