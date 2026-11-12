@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" version="1.2">
+  <file original="plunkconnect" source-language="en-US" target-language="lt-LT" datatype="plaintext">
+    <body>
+      <trans-unit id="21165270eda2e95330c48265c2f62e93">
+        <source>Plunk Connect</source>
+        <target>Plunk Connect</target>
+      </trans-unit>
+      <trans-unit id="6b66117195d4f71fd8d2605fee5a02f8">
+        <source>Syncs the shop with a self-hosted Plunk instance: newsletter subscriptions (double opt-in), inbound webhook, GDPR. All API calls go through a queued outbox.</source>
+        <target>Sinchronizuoja parduotuvę su self-hosted Plunk: naujienlaiškio prenumeratos (double opt-in), įeinantis webhook, GDPR. Visos API užklausos eina per eilės (outbox) mechanizmą.</target>
+      </trans-unit>
+      <trans-unit id="89b232297318b4f57a8fc98d419b0633">
+        <source>Are you sure? Queued messages and module configuration will be deleted.</source>
+        <target>Ar tikrai? Laukiančios žinutės ir modulio konfigūracija bus ištrintos.</target>
+      </trans-unit>
+      <trans-unit id="f4d5809ef922c91f0ad65ebf3e2ba230">
+        <source>Token regenerated.</source>
+        <target>Raktas pergeneruotas.</target>
+      </trans-unit>
+      <trans-unit id="ff48a324af0698f16302ef6fa335b9fb">
+        <source>%d dead message(s) re-queued.</source>
+        <target>%d „dead“ žinutė(-ės) grąžinta į eilę.</target>
+      </trans-unit>
+      <trans-unit id="9a7e58ee13cb727cb7c4acc68f4cafe5">
+        <source>Settings saved.</source>
+        <target>Nustatymai išsaugoti.</target>
+      </trans-unit>
+      <trans-unit id="231e1c1e1acf1b5d49a157b0adfbbb73">
+        <source>Outbox status</source>
+        <target>Išėjimo eilės (outbox) būsena</target>
+      </trans-unit>
+      <trans-unit id="74554fd19f9edfc57284460bc993a295">
+        <source>Re-queue dead messages</source>
+        <target>Grąžinti „dead“ žinutes į eilę</target>
+      </trans-unit>
+      <trans-unit id="39838db537c95bc8df810c5601601d5b">
+        <source>Test connection</source>
+        <target>Tikrinti ryšį</target>
+      </trans-unit>
+      <trans-unit id="60b77244600c306d8d2e969db68d5c9c">
+        <source>Recent errors</source>
+        <target>Paskutinės klaidos</target>
+      </trans-unit>
+      <trans-unit id="2a6ba72e93aa7fa676d07973ed2716bb">
+        <source>Endpoint</source>
+        <target>Endpoint'as</target>
+      </trans-unit>
+      <trans-unit id="ec53a8c4f07baed5d8825072c89799be">
+        <source>Status</source>
+        <target>Būsena</target>
+      </trans-unit>
+      <trans-unit id="7ba3b8236d48d4f4c5ec03c3fe6b75a9">
+        <source>Attempts</source>
+        <target>Bandymai</target>
+      </trans-unit>
+      <trans-unit id="902b0d55fddef6f8d651fe1035b7d4bd">
+        <source>Error</source>
+        <target>Klaida</target>
+      </trans-unit>
+      <trans-unit id="ff0a3b7f3daef040faf89a88fdac01b7">
+        <source>Updated</source>
+        <target>Atnaujinta</target>
+      </trans-unit>
+      <trans-unit id="b8724da75fb917e992576b17378e66b3">
+        <source>Endpoints</source>
+        <target>Endpoint'ai</target>
+      </trans-unit>
+      <trans-unit id="789dca6ac0c3a45a18df611347223c88">
+        <source>API URL must be an absolute https:// URL.</source>
+        <target>API URL turi būti absoliutus https:// URL.</target>
+      </trans-unit>
+      <trans-unit id="31be228850eecb6e4891a37666e6c887">
+        <source>API URL must use https://.</source>
+        <target>API URL turi naudoti https://.</target>
+      </trans-unit>
+      <trans-unit id="71819ec1614b2292a6c682bcceb807fc">
+        <source>%s must start with %s.</source>
+        <target>%s turi prasidėti %s.</target>
+      </trans-unit>
+      <trans-unit id="4134d4fb9ee7257c5916a4dd4d4d4366">
+        <source>Fallback locale is not allowed.</source>
+        <target>Atsarginė locale reikšmė neleidžiama.</target>
+      </trans-unit>
+      <trans-unit id="ff716c39afbcd2999caf87acf76a155f">
+        <source>Locale for language #%d is not allowed.</source>
+        <target>Kalbai #%d pasirinkta locale neleidžiama.</target>
+      </trans-unit>
+      <trans-unit id="0324e8655a8322f856998944c79fe265">
+        <source>Configure API URL and keys first.</source>
+        <target>Pirmiausia sukonfigūruokite API URL ir raktus.</target>
+      </trans-unit>
+      <trans-unit id="d2d2635d85fdf7b19c94052b6b67ef0c">
+        <source>Connection OK (HTTP %d).</source>
+        <target>Ryšys veikia (HTTP %d).</target>
+      </trans-unit>
+      <trans-unit id="78c182952076df476376efd9fb4e0d64">
+        <source>Connection failed: %s</source>
+        <target>Ryšys nepavyko: %s</target>
+      </trans-unit>
+      <trans-unit id="810499f34d0ae4114305853979a2fdc2">
+        <source>Plunk API URL</source>
+        <target>Plunk API URL</target>
+      </trans-unit>
+      <trans-unit id="5bd4f25020d0cd0e0e0e7c4b8180e7d4">
+        <source>e.g. https://api.example.com — no trailing slash needed.</source>
+        <target>pvz. https://api.example.com — gale bruksnio nereikia.</target>
+      </trans-unit>
+      <trans-unit id="7e25c07228b932ace97b6987293328d2">
+        <source>Public key (pk_…)</source>
+        <target>Viešasis raktas (pk_…)</target>
+      </trans-unit>
+      <trans-unit id="1afd5923d22891ff3af24735d410568d">
+        <source>Used for /v1/track. Current: %s</source>
+        <target>Naudojamas /v1/track. Dabartinis: %s</target>
+      </trans-unit>
+      <trans-unit id="a068c644208ee41eaacec65c7b81fda9">
+        <source>Secret key (sk_…)</source>
+        <target>Slaptas raktas (sk_…)</target>
+      </trans-unit>
+      <trans-unit id="c8329a93b1f653a43121a8abe5da6df6">
+        <source>Used for /contacts. Current: %s</source>
+        <target>Naudojamas /contacts. Dabartinis: %s</target>
+      </trans-unit>
+      <trans-unit id="b063b479cd6722afe4599c6acb2064a8">
+        <source>Consent source label</source>
+        <target>Sutikimo šaltinio žyma</target>
+      </trans-unit>
+      <trans-unit id="86fc7a03622edd69b41dd79e349b7a6c">
+        <source>Sent as data.consentSource, e.g. website_signup.</source>
+        <target>Siunčiama kaip data.consentSource, pvz. website_signup.</target>
+      </trans-unit>
+      <trans-unit id="f490b1e9a3253eb1bf829447cd3dc631">
+        <source>Shop code</source>
+        <target>Parduotuvės kodas</target>
+      </trans-unit>
+      <trans-unit id="80a3d68e71d90c2e377c8632009b1591">
+        <source>Sent as data.shopCode to tell shops apart in Plunk, e.g. bz.</source>
+        <target>Siunčiama kaip data.shopCode, kad Plunk'e būtų galima atskirti parduotuves, pvz. bz.</target>
+      </trans-unit>
+      <trans-unit id="7aee4ec2796bc54c3a90bdbdb3da681f">
+        <source>(Russian is never sent; fallback applies)</source>
+        <target>(rusų kalba niekada nesiunčiama; taikomas fallback)</target>
+      </trans-unit>
+      <trans-unit id="36294cb081adcc244fe0d5f6ba78847e">
+        <source>Locale for %s (iso %s)</source>
+        <target>Locale kalbai %s (iso %s)</target>
+      </trans-unit>
+      <trans-unit id="01cdd1d425c25611710813aa03ee7d9e">
+        <source>— auto (iso code) —</source>
+        <target>— automatiškai (iso kodas) —</target>
+      </trans-unit>
+      <trans-unit id="1186d40c962b370c82f69913480c15e1">
+        <source>Fallback locale</source>
+        <target>Atsarginė (fallback) locale</target>
+      </trans-unit>
+      <trans-unit id="a210fad89dd91fc76d60330e7352c9d3">
+        <source>Used for unmapped languages and for Russian (ru is never sent).</source>
+        <target>Naudojama nesusietoms kalboms ir rusų kalbai (ru niekada nesiunčiama).</target>
+      </trans-unit>
+      <trans-unit id="451bd1a4947be074e69924be672ec103">
+        <source>Newsletter sync</source>
+        <target>Naujienlaiškio sinchronizacija</target>
+      </trans-unit>
+      <trans-unit id="16e4faa5f1d314fc792722a220381691">
+        <source>Double opt-in (Plunk confirms)</source>
+        <target>Double opt-in (patvirtina Plunk)</target>
+      </trans-unit>
+      <trans-unit id="3160a6f26b0d82aff8f37ad61b3be1ac">
+        <source>Behaviour tracking (stage 2)</source>
+        <target>Elgsenos sekimas (2 etapas)</target>
+      </trans-unit>
+      <trans-unit id="eea3125b9db206a1a8e4872ffaf87fa7">
+        <source>Cart events (stage 2)</source>
+        <target>Krepšelio įvykiai (2 etapas)</target>
+      </trans-unit>
+      <trans-unit id="7f117f27a726ad171f5245ce10a94639">
+        <source>Order events (stage 2)</source>
+        <target>Užsakymų įvykiai (2 etapas)</target>
+      </trans-unit>
+      <trans-unit id="dd84985175890aab19a334d6b18db3d6">
+        <source>Catalog feed (stage 3)</source>
+        <target>Katalogo feed'as (3 etapas)</target>
+      </trans-unit>
+      <trans-unit id="cf5fae720d7b7a1f1074c016d2f860fb">
+        <source>Coupons (stage 4)</source>
+        <target>Kuponai (4 etapas)</target>
+      </trans-unit>
+      <trans-unit id="12a257160ed536c63260bfeddc81efbe">
+        <source>Back-in-stock (stage 4)</source>
+        <target>Atsirado sandėlyje (4 etapas)</target>
+      </trans-unit>
+      <trans-unit id="93cba07454f06a4a960172bbd6e2a435">
+        <source>Yes</source>
+        <target>Taip</target>
+      </trans-unit>
+      <trans-unit id="bafd7322c6e97d25b6299b5d6fe8920b">
+        <source>No</source>
+        <target>Ne</target>
+      </trans-unit>
+      <trans-unit id="59ec85cdc5251c82fa31c6fda180fa09">
+        <source>Order states = %s</source>
+        <target>Užsakymo būsenos = %s</target>
+      </trans-unit>
+      <trans-unit id="009a07800e4e0213ccfa475ddd9fef8a">
+        <source>Marketing consent cookie name</source>
+        <target>Marketingo sutikimo slapuko pavadinimas</target>
+      </trans-unit>
+      <trans-unit id="d9f91508b6f76ef3ebe99837a6dd42d2">
+        <source>Behaviour events are only tracked when this cookie matches the value below. Leave empty to track everyone.</source>
+        <target>Elgsenos įvykiai sekami tik kai šis slapukas atitinka žemiau nurodytą reikšmę. Palikite tuščią, kad sektumėte visus.</target>
+      </trans-unit>
+      <trans-unit id="77b2c022e18a7b3d6b82045a84c7cd4e">
+        <source>Marketing consent cookie value</source>
+        <target>Marketingo sutikimo slapuko reikšmė</target>
+      </trans-unit>
+      <trans-unit id="03d04e7b7ac118138ab38fc723db40af">
+        <source>Plunk connection</source>
+        <target>Plunk ryšys</target>
+      </trans-unit>
+      <trans-unit id="c9cc8cce247e49bae79f15173ce97354">
+        <source>Save</source>
+        <target>Išsaugoti</target>
+      </trans-unit>
+      <trans-unit id="f6861770bdf2fb702a665f1b34e4f9ed">
+        <source>Tokens</source>
+        <target>Raktai (tokens)</target>
+      </trans-unit>
+      <trans-unit id="e6d6b1474dd1e55facfd72ea170aa11f">
+        <source>Webhook secret (Bearer for the inbound webhook)</source>
+        <target>Webhook secret (Bearer įeinančiam webhook'ui)</target>
+      </trans-unit>
+      <trans-unit id="451e0447097e6484ed2d5fd2a01ec76f">
+        <source>Cron token (for the cron front controller)</source>
+        <target>Cron raktas (cron front controller'iui)</target>
+      </trans-unit>
+      <trans-unit id="0d38a49555d6ac36f6e6ec42b4b61536">
+        <source>Feed token (stage 3 feeds)</source>
+        <target>Feed raktas (3 etapo feed'ams)</target>
+      </trans-unit>
+      <trans-unit id="b2326c3a3498ee50c8120fbaede6eeed">
+        <source>Regenerate</source>
+        <target>Pergeneruoti</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

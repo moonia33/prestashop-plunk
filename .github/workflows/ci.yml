@@ -1,0 +1,56 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.1'
+                  extensions: curl, mbstring
+            - name: PHP lint
+              run: find plunkconnect -name '*.php' -not -path '*/vendor/*' -print0 | xargs -0 -n1 php -l
+
+    phpstan:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.1'
+                  extensions: curl, mbstring
+            - working-directory: plunkconnect
+              run: composer install --no-interaction --no-progress
+            - working-directory: plunkconnect
+              run: ./vendor/bin/phpstan analyse --no-progress
+
+    phpunit:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.1'
+                  extensions: curl, mbstring
+            - working-directory: plunkconnect
+              run: composer install --no-interaction --no-progress
+            - working-directory: plunkconnect
+              run: ./vendor/bin/phpunit
+
+    cs-fixer:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.1'
+            - working-directory: plunkconnect
+              run: composer install --no-interaction --no-progress
+            - working-directory: plunkconnect
+              run: ./vendor/bin/php-cs-fixer fix --dry-run --diff

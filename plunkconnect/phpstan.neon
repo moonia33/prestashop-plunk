@@ -1,0 +1,13 @@
+parameters:
+    level: 6
+    paths:
+        - src
+        - controllers
+        - sql
+        - plunkconnect.php
+    bootstrapFiles:
+        - tests/stubs/prestashop.php
+    excludePaths:
+        - tests/*
+        - vendor/*
+    treatPhpDocTypesAsCertain: false

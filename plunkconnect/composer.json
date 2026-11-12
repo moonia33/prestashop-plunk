@@ -1,0 +1,31 @@
+{
+    "name": "moonia33/plunkconnect",
+    "description": "PrestaShop module: syncs the shop with a self-hosted Plunk instance (newsletter subscriptions, outbox queue, webhooks, GDPR).",
+    "type": "prestashop-module",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6 || ^10.5 || ^11.0",
+        "prestashop/php-dev-tools": "^4.3",
+        "phpstan/phpstan": "^1.10",
+        "friendsofphp/php-cs-fixer": "^3.40"
+    },
+    "autoload": {
+        "psr-4": {
+            "PlunkConnect\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PlunkConnect\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "platform-check": false,
+        "sort-packages": true
+    }
+}
