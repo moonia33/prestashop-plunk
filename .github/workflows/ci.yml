@@ -25,9 +25,9 @@ jobs:
               with:
                   php-version: '8.1'
                   extensions: curl, mbstring
-            - working-directory: plunkconnect
+            - working-directory: .
               run: composer install --no-interaction --no-progress
-            - working-directory: plunkconnect
+            - working-directory: .
               run: ./vendor/bin/phpstan analyse --no-progress
 
     phpunit:
@@ -38,9 +38,9 @@ jobs:
               with:
                   php-version: '8.1'
                   extensions: curl, mbstring
-            - working-directory: plunkconnect
+            - working-directory: .
               run: composer install --no-interaction --no-progress
-            - working-directory: plunkconnect
+            - working-directory: .
               run: ./vendor/bin/phpunit
 
     cs-fixer:
@@ -50,7 +50,7 @@ jobs:
             - uses: shivammathur/setup-php@v2
               with:
                   php-version: '8.1'
-            - working-directory: plunkconnect
+            - working-directory: .
               run: composer install --no-interaction --no-progress
-            - working-directory: plunkconnect
+            - working-directory: .
               run: ./vendor/bin/php-cs-fixer fix --dry-run --diff

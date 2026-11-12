@@ -13,7 +13,7 @@ PrestaShop modulis, kuris pakeičia Newsman (`newsmanapp`, `newsmancoupons`) ir 
 
 ## Diegimas
 
-1. `plunkconnect/` katalogą nukopijuoti į `modules/`.
+1. Repozitoriją nuklonuoti į `modules/` kaip `plunkconnect`: `git clone https://github.com/moonia33/prestashop-plunk.git modules/plunkconnect` (repo šaknis = modulio šaknis, kaip įprasta PrestaShop moduliams).
 2. Admin → Modules → Module Manager → įdiegti **Plunk Connect**.
 3. Modulio konfigūracijoje (kontekste – konkreti parduotuvė):
    - **Plunk API URL**, **pk_**, **sk_** raktai → „Išsaugoti“ → „Tikrinti ryšį“.
