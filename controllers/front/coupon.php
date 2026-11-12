@@ -2,11 +2,14 @@
 
 /**
  * POST /module/plunkconnect/coupon
- * Same HMAC auth as the webhook. Body:
- * {email, type: percent|amount|free_shipping, value, prefix, validDays,
- *  minAmount, currency}
- * -> {code, validUntil}; the code is also written to the contact as
- * data.lastCouponCode / lastCouponValidUntil via the outbox.
+ * Auth: `Authorization: Bearer <coupon secret>` (Config::COUPON_SECRET).
+ * Body: {email, rule, cartId?|executionId?}
+ *  - `rule` selects a coupon rule from the module config (type/value/
+ *    validDays/minAmount/prefix/excludeSpecial are NOT trusted from the
+ *    request, they come from COUPON_RULES settings).
+ * Idempotent on email+rule+cartId/executionId. Rate-limited per email+rule
+ * over a rolling 30-day window.
+ * -> {code, validUntil, value, type, minAmount}.
  */
 require_once dirname(__DIR__, 2) . '/autoload.php';
 
@@ -24,20 +27,28 @@ class PlunkconnectCouponModuleFrontController extends ModuleFrontController
         if (!Config::getBool(Config::FEAT_COUPONS)) {
             $this->respond(403, ['error' => 'feature_disabled']);
         }
-
-        $rawBody = (string) file_get_contents('php://input');
-        if (!RequestAuth::verifySignedRequest($rawBody)) {
+        if (!RequestAuth::checkBearer(Config::COUPON_SECRET)) {
             $this->respond(401, ['error' => 'unauthorized']);
         }
-        $body = json_decode($rawBody, true);
+        $body = json_decode((string) file_get_contents('php://input'), true);
         if (!is_array($body)) {
             $this->respond(400, ['error' => 'invalid_json']);
         }
 
+        $rule = (string) ($body['rule'] ?? '');
+        $email = (string) ($body['email'] ?? '');
+        $cartId = (int) ($body['cartId'] ?? $body['cart_id'] ?? 0);
+        $executionId = substr((string) ($body['executionId'] ?? $body['execution_id'] ?? ''), 0, 64);
+
         try {
-            $result = CouponService::create($body);
+            $result = CouponService::create($rule, $email, $cartId, $executionId);
         } catch (InvalidArgumentException $e) {
             $this->respond(422, ['error' => $e->getMessage()]);
+        } catch (RuntimeException $e) {
+            if ('rate_limited' === $e->getMessage()) {
+                $this->respond(429, ['error' => 'rate_limited']);
+            }
+            $this->respond(500, ['error' => 'internal']);
         } catch (Throwable $e) {
             $this->respond(500, ['error' => 'internal']);
         }

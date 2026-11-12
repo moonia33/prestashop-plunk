@@ -23,7 +23,7 @@ PrestaShop module connecting a shop to a self-hosted Plunk instance (replaces `n
 | Plunk API URL | pvz. `https://api.mk.example.lt` |
 | Public key `pk_…` | `POST /v1/track` |
 | Secret key `sk_…` | `/contacts`, lookup, delete |
-| Webhook secret | HMAC pasirašymui (webhook, coupon, restorecart, `pk_e`) |
+| Webhook secret | HMAC pasirašymui (webhook, restorecart, `pk_e`) + Bearer fallback webhook'ui |
 | Feed token | katalogo feed ir gyvų produktų endpointai |
 | Cron token | `/module/plunkconnect/cron?token=…` |
 | Kalbų žemėlapis | `id_lang` → `lt/lv/et/en/pl`; `ru` → fallback (`ru` niekada tikslas negali būti) |
@@ -51,7 +51,7 @@ Atsarginis variantas be CLI: `GET /module/plunkconnect/cron?token=<cron token>` 
 | GET | `/module/plunkconnect/feed/categories?lang=lt` | `Bearer <feed token>` | kategorijų feed |
 | GET | `/module/plunkconnect/products?ids=1,2&lang=lt` | `Bearer <feed token>` | gyva kaina/likutis (≤50 ID; neaktyvios → `available:false`) |
 | GET | `/module/plunkconnect/recommendations?product_ids=…&lang=lt&limit=6` | `Bearer <feed token>` | priedai + kategorijos best selleriai, tik turimos |
-| POST | `/module/plunkconnect/coupon` | HMAC kaip webhook | vienkartinis `CartRule` → `{code, validUntil}`; kodas ir galiojimas įrašomi kontaktui (`lastCouponCode`, `lastCouponValidUntil`) |
+| POST | `/module/plunkconnect/coupon` | `Bearer <coupon secret>` | vienkartinis `CartRule` iš modulio taisyklės → `{code, validUntil, value, type, minAmount}`; žr. skyrių žemiau |
 | GET | `/module/plunkconnect/restorecart?c=&e=&t=` | HMAC nuoroda (30 d.) | atkuria svečio krepšelį; registruoto – per prisijungimą |
 
 ### Įvykiai (visi per outbox → `POST /v1/track`)
@@ -69,12 +69,34 @@ Masyvai (`product`, `cart`, `order`) siunčiami kaip `{value:…, persistent:fal
 - `plunkconnect:outbox:process [--limit=200] [--max-seconds=50]`
 - `plunkconnect:subscribers:backfill --since=YYYY-MM-DD [--dry-run]` – `contacts_ifnew`: esamiems kontaktams `subscribed` nekeičia
 - `plunkconnect:subscribers:reconcile` – tik raportuoja neatitikimus
+- `plunkconnect:coupons:cleanup [--dry-run]` – trina pasibaigusius nepanaudotus modulio kuponus (`CartRule` + `plunk_coupon`)
 
 ### Pastabos Plunk workflow'ams
 
 - WEBHOOK žingsnis: jei Plunk nemoka skaičiuoti HMAC, naudokite statinę antraštę `Authorization: Bearer <webhook secret>`.
 - Nuorodos laiškuose gali turėti `?pk_e=<token>` (token = `base64url(email).hmac(email)`) – modulis įsimins lankytoją `plunk_id` cookie (365 d).
 - `{{contact.lastCouponCode}}` – kuponas, sukurtas `/coupon` endpoint'o.
+- Kuponų endpoint'o atsakymą WEBHOOK žingsnyje galima išsaugoti `saveResponseAs` (jei Plunk fork'e tai palaikoma) ir naudoti `{{event.coupon.code}}` vėlesniuose žingsniuose.
+
+### Kupono endpoint'as (`POST /module/plunkconnect/coupon`)
+
+Auth: `Authorization: Bearer <coupon secret>` (admin → Security tokens → Coupon secret).
+
+Body: `{"email": "...", "rule": "welcome10", "cartId": 123}` arba `{"email": "...", "rule": "welcome10", "executionId": "wf-exec-42"}`.
+`cartId` arba `executionId` – bet kuris (abu kartu idempotencijai geriau).
+
+Visi kupono parametrai imami iš admin → Coupon rules (JSON), **ne** iš užklausos:
+```json
+{"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}
+```
+
+Atsakymas: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "type": "percent", "minAmount": 30}`
+
+- Kodas: `PREFIX-` + 8 simboliai be `0/O/1/I/L`; `quantity=1`, `quantity_per_user=1`, nesujungiamas su kitais kuponais, `reduction_exclude_special` pagal taisyklę; registruotam klientui pririšamas prie `id_customer`.
+- Idempotencija: tas pats `email+rule+cartId/executionId` → tas pats kuponas; gyvas (nepasibaigęs) kuponas tam pačiam `email+rule` taip pat pernaudojamas.
+- Rate limit: ≤3 kuponai / `email+rule` / 30 d. → HTTP 429.
+- Kiekvienas sukurtas kodas sekamas `PREFIX_plunk_coupon`; `order.placed` įvykio `data.order.couponCode` nurodo panaudotą kodą.
+- Kodas taip pat įrašomas kontaktui: `lastCouponCode`, `lastCouponValidUntil`.
 
 ---
 
@@ -113,3 +135,22 @@ Persistent `data` holds small scalars only; arrays travel as `{value:…, persis
 - If the WEBHOOK step cannot compute HMAC, use the static `Authorization: Bearer <webhook secret>` fallback.
 - Email links may carry `?pk_e=<token>` (token = `base64url(email).hmac(email)`) – the module stores a `plunk_id` cookie (365 d).
 - `{{contact.lastCouponCode}}` is set by the `/coupon` endpoint.
+- The coupon response can be captured by the WEBHOOK step via `saveResponseAs` (if supported by the Plunk fork) and used as `{{event.coupon.code}}` in later steps.
+
+### Coupon endpoint (`POST /module/plunkconnect/coupon`)
+
+Auth: `Authorization: Bearer <coupon secret>` (admin → Security tokens → Coupon secret).
+
+Body: `{"email": "...", "rule": "welcome10", "cartId": 123}` or `{"email": "...", "rule": "welcome10", "executionId": "wf-exec-42"}`.
+
+All coupon parameters come from admin → Coupon rules (JSON), never from the request:
+```json
+{"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}
+```
+
+Response: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "type": "percent", "minAmount": 30}`
+
+- Code: `PREFIX-` + 8 unambiguous chars; `quantity=1`, `quantity_per_user=1`, not combinable, `reduction_exclude_special` per rule; bound to `id_customer` for registered customers.
+- Idempotent on `email+rule+cartId/executionId`; a live coupon for the same `email+rule` is reused.
+- Rate limit: ≤3 coupons / `email+rule` / 30d → HTTP 429.
+- Tracked in `PREFIX_plunk_coupon`; `order.placed` carries `data.order.couponCode`; unused expired rules are removed by `plunkconnect:coupons:cleanup`.

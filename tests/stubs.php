@@ -228,6 +228,17 @@ class ObjectModel
     {
         return true;
     }
+
+    /** @param bool $autoDate */
+    public function add($autoDate = true, bool $nullValues = false): bool
+    {
+        return true;
+    }
+
+    public function delete(): bool
+    {
+        return true;
+    }
 }
 
 class Language extends ObjectModel

@@ -15,3 +15,7 @@ services:
     plunkconnect.command.subscribers_reconcile:
         class: PlunkConnect\Command\ReconcileSubscribersCommand
         tags: ['console.command']
+
+    plunkconnect.command.coupons_cleanup:
+        class: PlunkConnect\Command\CleanupCouponsCommand
+        tags: ['console.command']

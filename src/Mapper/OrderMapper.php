@@ -41,10 +41,17 @@ final class OrderMapper
         }
 
         $currency = new \Currency((int) $order->id_currency);
+        $couponCode = \Db::getInstance()->getValue(
+            'SELECT cr.`code` FROM `' . _DB_PREFIX_ . 'order_cart_rule` ocr
+             INNER JOIN `' . _DB_PREFIX_ . 'cart_rule` cr ON cr.`id_cart_rule` = ocr.`id_cart_rule`
+             WHERE ocr.`id_order` = ' . (int) $order->id . '
+             ORDER BY ocr.`id_order_cart_rule` LIMIT 1'
+        );
 
         return [
             'id' => (int) $order->id,
             'reference' => (string) $order->reference,
+            'couponCode' => $couponCode ? (string) $couponCode : null,
             'total' => \Tools::ps_round((float) $order->total_paid_tax_incl, $precision),
             'shipping' => \Tools::ps_round((float) $order->total_shipping_tax_incl, $precision),
             'discounts' => \Tools::ps_round((float) $order->total_discounts_tax_incl, $precision),

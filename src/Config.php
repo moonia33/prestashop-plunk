@@ -19,6 +19,8 @@ final class Config
     public const WEBHOOK_SECRET = self::PREFIX . 'WEBHOOK_SECRET';
     public const FEED_TOKEN = self::PREFIX . 'FEED_TOKEN';
     public const CRON_TOKEN = self::PREFIX . 'CRON_TOKEN';
+    public const COUPON_SECRET = self::PREFIX . 'COUPON_SECRET';
+    public const COUPON_RULES = self::PREFIX . 'COUPON_RULES';
 
     /** JSON: {"1":"lt","2":"lv",...} mapping id_lang => Plunk locale. */
     public const LOCALE_MAP = self::PREFIX . 'LOCALE_MAP';
@@ -48,6 +50,7 @@ final class Config
     public const ALL_KEYS = [
         self::API_URL, self::PUBLIC_KEY, self::SECRET_KEY,
         self::WEBHOOK_SECRET, self::FEED_TOKEN, self::CRON_TOKEN,
+        self::COUPON_SECRET, self::COUPON_RULES,
         self::LOCALE_MAP, self::LOCALE_FALLBACK, self::ORDERSTATE_MAP,
         self::FEAT_SUBSCRIPTIONS, self::FEAT_DOUBLE_OPTIN, self::FEAT_VIEWS,
         self::FEAT_CART, self::FEAT_ORDERS, self::FEAT_FEED, self::FEAT_COUPONS,

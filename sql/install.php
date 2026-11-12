@@ -25,6 +25,28 @@ $sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_outbox` (
     KEY `dedupe_key` (`dedupe_key`)
 ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
 
+$sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_coupon` (
+    `id_plunk_coupon` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `id_cart_rule` INT UNSIGNED NOT NULL,
+    `id_shop` INT UNSIGNED NOT NULL DEFAULT 0,
+    `email` VARCHAR(255) NOT NULL,
+    `rule` VARCHAR(64) NOT NULL,
+    `id_cart` INT UNSIGNED NOT NULL DEFAULT 0,
+    `execution_id` VARCHAR(64) NOT NULL DEFAULT \'\',
+    `code` VARCHAR(64) NOT NULL,
+    `type` VARCHAR(32) NOT NULL DEFAULT \'percent\',
+    `value` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `min_amount` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `date_add` DATETIME NOT NULL,
+    `date_exp` DATETIME NOT NULL,
+    PRIMARY KEY (`id_plunk_coupon`),
+    UNIQUE KEY `id_cart_rule` (`id_cart_rule`),
+    UNIQUE KEY `code` (`code`),
+    UNIQUE KEY `idem` (`email`, `rule`, `id_cart`, `execution_id`),
+    KEY `email_rule` (`email`, `rule`),
+    KEY `date_exp` (`date_exp`)
+) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+
 foreach ($sql as $query) {
     if (!Db::getInstance()->execute($query)) {
         return false;

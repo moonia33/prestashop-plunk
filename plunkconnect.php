@@ -99,6 +99,8 @@ class Plunkconnect extends Module
         Config::set(Config::WEBHOOK_SECRET, Config::generateSecret(32));
         Config::set(Config::FEED_TOKEN, Config::generateSecret(24));
         Config::set(Config::CRON_TOKEN, Config::generateSecret(24));
+        Config::set(Config::COUPON_SECRET, Config::generateSecret(32));
+        Config::set(Config::COUPON_RULES, '{}');
         Config::set(Config::LOCALE_FALLBACK, LocaleMapper::DEFAULT_FALLBACK);
         Config::set(Config::FEAT_SUBSCRIPTIONS, 1);
         Config::set(Config::FEAT_DOUBLE_OPTIN, 1);
@@ -347,7 +349,7 @@ class Plunkconnect extends Module
         }
         if (Tools::isSubmit('regenPlunkToken')) {
             $key = (string) Tools::getValue('token_key');
-            if (in_array($key, [Config::WEBHOOK_SECRET, Config::FEED_TOKEN, Config::CRON_TOKEN], true)) {
+            if (in_array($key, [Config::WEBHOOK_SECRET, Config::FEED_TOKEN, Config::CRON_TOKEN, Config::COUPON_SECRET], true)) {
                 Config::set($key, Config::generateSecret(32));
                 $output .= $this->displayConfirmation($this->l('Token regenerated.'));
             }
@@ -408,6 +410,14 @@ class Plunkconnect extends Module
             $stateMap[$event] = is_array($selected) ? array_map('intval', $selected) : [];
         }
         Config::set(Config::ORDERSTATE_MAP, json_encode($stateMap));
+
+        // Coupon rules JSON: only persist when it decodes to an object.
+        $rulesJson = trim((string) Tools::getValue(Config::COUPON_RULES));
+        $rules = '' === $rulesJson ? [] : json_decode($rulesJson, true);
+        if (!is_array($rules)) {
+            return $this->displayError($this->l('Invalid coupon rules JSON - other settings were saved.'));
+        }
+        Config::set(Config::COUPON_RULES, json_encode($rules));
 
         return $this->displayConfirmation($this->l('Settings saved.'));
     }
@@ -496,6 +506,7 @@ class Plunkconnect extends Module
                     ['type' => 'free', 'label' => $this->l('Webhook secret'), 'name' => 'display_webhook'],
                     ['type' => 'free', 'label' => $this->l('Feed token'), 'name' => 'display_feed'],
                     ['type' => 'free', 'label' => $this->l('Cron token'), 'name' => 'display_cron'],
+                    ['type' => 'free', 'label' => $this->l('Coupon secret'), 'name' => 'display_coupon'],
                 ],
             ]],
             ['form' => [
@@ -511,6 +522,14 @@ class Plunkconnect extends Module
             ['form' => [
                 'legend' => ['title' => $this->l('Features'), 'icon' => 'icon-cogs'],
                 'input' => $this->featureInputs(),
+                'submit' => ['title' => $this->l('Save')],
+            ]],
+            ['form' => [
+                'legend' => ['title' => $this->l('Coupon rules'), 'icon' => 'icon-tags'],
+                'input' => [
+                    ['type' => 'textarea', 'label' => $this->l('Rules (JSON)'), 'name' => Config::COUPON_RULES,
+                        'desc' => $this->l('One entry per rule name: {"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}. Fields: type percent|amount|free_shipping, value, validDays, minAmount, prefix, excludeSpecial, event (informational).')],
+                ],
                 'submit' => ['title' => $this->l('Save')],
             ]],
             ['form' => [
@@ -627,6 +646,8 @@ class Plunkconnect extends Module
             'display_webhook' => $mask(Config::WEBHOOK_SECRET),
             'display_feed' => $mask(Config::FEED_TOKEN),
             'display_cron' => $mask(Config::CRON_TOKEN),
+            'display_coupon' => $mask(Config::COUPON_SECRET),
+            Config::COUPON_RULES => Config::get(Config::COUPON_RULES),
         ];
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
