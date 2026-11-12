@@ -2,6 +2,16 @@
 
 All notable changes to `plunkconnect` are documented here.
 
+## [1.2.0] - 2026-11-15
+
+### Added
+- Catalog sync to Plunk (`/catalog/products`, spec 5.4): `CatalogMapper` builds full product documents (canonical string ids `<id_product>` / `<id_product>-<id_product_attribute>`, `parentId`, sku, name, sanitized description <=1000 chars, HTTPS url with `#/<attr>` anchor, cover + up to 5 images, price/salePrice VAT-incl., `available`, `quantity`, brand, LT categories, `translations` for lv/pl/et/en skipping id_lang 5 and never sending `ru`).
+- Outbox endpoints `catalog.upsert` (PUT batches <=500 items incl. combinations), `catalog.patch` (dedupe per id, 60 s coalescing, grouped PATCH <=1000, `notFound` ids re-queued as upserts) and `catalog.delete` (POST ids <=1000).
+- Hooks: product add/update/delete, combination add/update/delete, specific-price add/update/delete, `actionUpdateQuantity`/`StockAvailable` -> patch; delete ids collected in `actionObjectProductDeleteBefore` so combination ids survive the product row.
+- `plunkconnect:catalog:sync` command (`--full`, `--from=<id>`, incremental via `date_upd` + `specific_price` activation/expiry windows); cron integration: incremental every ~15 min, full sync nightly 03:00-05:00 max once per 20 h.
+- Admin: `FEAT_CATALOG_SYNC` toggle, "Full sync now" button (queues outbox rows only) and last-sync diagnostics.
+- `productId` string field (`<id>`/`<id>-<attr>`) on product payloads used by events, feeds and recommendations.
+
 ## [1.0.0] - 2026-11-12
 
 ### Added

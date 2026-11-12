@@ -108,7 +108,7 @@ final class ProductMapper
             if (isset($byId[$id]) && 1 === (int) $byId[$id]['active']) {
                 $out[] = $this->mapRow($byId[$id], $idShop, $idLang);
             } else {
-                $out[] = ['id' => $id, 'available' => false];
+                $out[] = ['id' => $id, 'productId' => (string) $id, 'available' => false];
             }
         }
 
@@ -128,6 +128,8 @@ final class ProductMapper
         if ($idProductAttribute > 0) {
             $product['combinationId'] = $idProductAttribute;
         }
+        // Plunk-wide id format: "<id_product>" or "<id_product>-<attr>".
+        $product['productId'] = $idProduct . ($idProductAttribute > 0 ? '-' . $idProductAttribute : '');
 
         return $product;
     }
@@ -178,6 +180,7 @@ final class ProductMapper
 
         return [
             'id' => $idProduct,
+            'productId' => (string) $idProduct,
             'combinationId' => 0,
             'sku' => (string) ($row['reference'] ?? ''),
             'ean' => (string) ($row['ean13'] ?? ''),

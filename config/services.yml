@@ -19,3 +19,7 @@ services:
     plunkconnect.command.coupons_cleanup:
         class: PlunkConnect\Command\CleanupCouponsCommand
         tags: ['console.command']
+
+    plunkconnect.command.catalog_sync:
+        class: PlunkConnect\Command\SyncCatalogCommand
+        tags: ['console.command']

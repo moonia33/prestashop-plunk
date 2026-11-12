@@ -15,6 +15,9 @@ use PlunkConnect\Api\PlunkClient;
 
 final class OutboxProcessor
 {
+    private const PATCH_GROUP_MAX = 1000;
+    private const UPSERT_CHUNK = 500;
+    private const DELETE_CHUNK = 1000;
     /** Exponential backoff in seconds: 1m, 5m, 15m, 1h, 6h. */
     public const RETRY_DELAYS = [60, 300, 900, 3600, 21600];
     public const MAX_ATTEMPTS = 8;
@@ -68,7 +71,21 @@ final class OutboxProcessor
         $stats['claimed'] = count($rows);
         $clients = [];
 
+        // catalog.patch rows are merged: up to 1000 products go out in a
+        // single PATCH request (dedupe already guarantees one row per id).
+        $patchGroups = [];
+        $normalRows = [];
+        $patchIndex = 0;
         foreach ($rows as $row) {
+            if ('catalog.patch' === $row['endpoint']) {
+                $patchGroups[intdiv($patchIndex, self::PATCH_GROUP_MAX)][] = $row;
+                ++$patchIndex;
+            } else {
+                $normalRows[] = $row;
+            }
+        }
+
+        foreach ($normalRows as $row) {
             if (microtime(true) > $deadline) {
                 break;
             }
@@ -79,6 +96,36 @@ final class OutboxProcessor
             $result = $this->dispatch($clients[$idShop], $row);
             $this->settle($row, $result, $stats);
 
+            usleep(self::REQUEST_DELAY_US);
+        }
+
+        $mapper = new \PlunkConnect\Mapper\CatalogMapper();
+        foreach ($patchGroups as $groupRows) {
+            if (microtime(true) > $deadline) {
+                break;
+            }
+            $docs = [];
+            $idShop = 0;
+            foreach ($groupRows as $row) {
+                $idShop = (int) $row['id_shop'];
+                $payload = json_decode((string) $row['payload'], true);
+                $plunkId = is_array($payload) ? (string) ($payload['id'] ?? '') : '';
+                if ('' !== $plunkId) {
+                    $doc = $mapper->buildPatch($plunkId, $idShop);
+                    if (null !== $doc) {
+                        $docs[$plunkId] = $doc;
+                    }
+                }
+            }
+            if (!isset($clients[$idShop])) {
+                $clients[$idShop] = new PlunkClient($idShop);
+            }
+            $result = $docs
+                ? $this->catalogPatchAndRequeue($clients[$idShop], array_values($docs), (string) $groupRows[0]['uuid'])
+                : ['status' => 200, 'retryAfter' => null, 'error' => null];
+            foreach ($groupRows as $row) {
+                $this->settle($row, $result, $stats);
+            }
             usleep(self::REQUEST_DELAY_US);
         }
 
@@ -140,9 +187,58 @@ final class OutboxProcessor
 
                 return $client->deleteContact($contactId);
 
+            case 'catalog.upsert':
+                // payload {ids:[id_product...]} -> full docs, PUT in <=500 chunks.
+                $mapper = new \PlunkConnect\Mapper\CatalogMapper();
+                $docs = $mapper->buildProducts(array_map('intval', (array) ($payload['ids'] ?? [])), (int) $row['id_shop']);
+                foreach (array_chunk($docs, self::UPSERT_CHUNK) as $i => $chunk) {
+                    $result = $client->catalogUpsert($chunk, $row['uuid'] . '-' . $i);
+                    $status = (int) ($result['status'] ?? 0);
+                    if ($status < 200 || $status >= 300) {
+                        return $result;
+                    }
+                }
+
+                return ['status' => 200, 'retryAfter' => null, 'error' => null];
+
+            case 'catalog.delete':
+                // payload {ids:[plunkId...]} -> POST /catalog/products/delete.
+                $ids = array_values(array_unique(array_map('strval', (array) ($payload['ids'] ?? []))));
+                foreach (array_chunk($ids, self::DELETE_CHUNK) as $i => $chunk) {
+                    $result = $client->catalogDelete($chunk, $row['uuid'] . '-' . $i);
+                    $status = (int) ($result['status'] ?? 0);
+                    if ($status < 200 || $status >= 300) {
+                        return $result;
+                    }
+                }
+
+                return ['status' => 200, 'retryAfter' => null, 'error' => null];
+
             default:
                 return ['status' => 400, 'retryAfter' => null, 'error' => 'unknown endpoint ' . $row['endpoint']];
         }
+    }
+
+    /**
+     * PATCH the merged docs; ids Plunk reports as notFound are requeued as
+     * full upserts (they need every field, not just price/stock).
+     */
+    private function catalogPatchAndRequeue(PlunkClient $client, array $docs, string $idempotencyKey): array
+    {
+        $result = $client->catalogPatch($docs, $idempotencyKey);
+        if ((int) ($result['status'] ?? 0) >= 200 && (int) ($result['status'] ?? 0) < 300
+            && is_array($result['body']) && !empty($result['body']['notFound'])) {
+            $ids = array_map(
+                fn ($plunkId) => (new \PlunkConnect\Mapper\CatalogMapper())->splitPlunkId((string) $plunkId)[0],
+                (array) $result['body']['notFound']
+            );
+            $ids = array_values(array_unique(array_filter($ids)));
+            if ($ids) {
+                Outbox::enqueue('catalog.upsert', ['ids' => $ids], 'catalog.upsert:' . md5(implode(',', $ids)));
+            }
+        }
+
+        return $result;
     }
 
     /**

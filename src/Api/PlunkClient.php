@@ -36,6 +36,36 @@ final class PlunkClient
     }
 
     /**
+     * PUT /catalog/products - full product docs, secret key.
+     *
+     * @param array<int, array<string, mixed>> $products max 500 per call
+     */
+    public function catalogUpsert(array $products, string $idempotencyKey): array
+    {
+        return $this->request('PUT', '/catalog/products', $this->secretKey, ['products' => $products], $idempotencyKey);
+    }
+
+    /**
+     * PATCH /catalog/products - price/stock only, secret key.
+     *
+     * @param array<int, array<string, mixed>> $products max 1000 per call
+     */
+    public function catalogPatch(array $products, string $idempotencyKey): array
+    {
+        return $this->request('PATCH', '/catalog/products', $this->secretKey, ['products' => $products], $idempotencyKey);
+    }
+
+    /**
+     * POST /catalog/products/delete - remove catalog ids, secret key.
+     *
+     * @param string[] $ids max 1000 per call
+     */
+    public function catalogDelete(array $ids, string $idempotencyKey): array
+    {
+        return $this->request('POST', '/catalog/products/delete', $this->secretKey, ['ids' => $ids], $idempotencyKey);
+    }
+
+    /**
      * POST /contacts - contact upsert without an event, secret key.
      */
     public function upsertContact(array $body, string $idempotencyKey): array

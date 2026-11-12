@@ -38,6 +38,16 @@ class Plunkconnect extends Module
         'actionFrontControllerSetMedia',
         'actionUpdateQuantity',
         'actionObjectStockAvailableUpdateAfter',
+        'actionProductAdd',
+        'actionProductUpdate',
+        'actionProductDelete',
+        'actionObjectProductDeleteBefore',
+        'actionObjectCombinationAddAfter',
+        'actionObjectCombinationUpdateAfter',
+        'actionObjectCombinationDeleteAfter',
+        'actionObjectSpecificPriceAddAfter',
+        'actionObjectSpecificPriceUpdateAfter',
+        'actionObjectSpecificPriceDeleteAfter',
         'actionDeleteGDPRCustomer',
         'actionExportGDPRData',
         'actionCronJob',
@@ -51,7 +61,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.0.0';
+        $this->version = '1.2.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -104,6 +114,7 @@ class Plunkconnect extends Module
         Config::set(Config::LOCALE_FALLBACK, LocaleMapper::DEFAULT_FALLBACK);
         Config::set(Config::FEAT_SUBSCRIPTIONS, 1);
         Config::set(Config::FEAT_DOUBLE_OPTIN, 1);
+        Config::set(Config::FEAT_CATALOG_SYNC, 0);
         Config::set(Config::CONSENT_SOURCE, 'website_signup');
         Config::set(Config::DB_VERSION, $this->version);
 
@@ -278,6 +289,9 @@ class Plunkconnect extends Module
         $idProduct = (int) ($params['id_product'] ?? 0);
         $idAttr = (int) ($params['id_product_attribute'] ?? 0);
         $qty = (int) ($params['quantity'] ?? -1);
+        if ($idProduct > 0) {
+            $this->catalogPatchProduct($idProduct, $idAttr);
+        }
         if ($idProduct > 0 && $qty > 0) {
             TrackingService::backInStock($idProduct, $idAttr, $qty);
         }
@@ -286,10 +300,132 @@ class Plunkconnect extends Module
     public function hookActionObjectStockAvailableUpdateAfter(array $params): void
     {
         $stock = $params['object'] ?? null;
-        if ($stock instanceof StockAvailable && (int) $stock->quantity > 0) {
-            TrackingService::backInStock((int) $stock->id_product, (int) $stock->id_product_attribute, (int) $stock->quantity);
+        if ($stock instanceof StockAvailable) {
+            $this->catalogPatchProduct((int) $stock->id_product, (int) $stock->id_product_attribute);
+            if ((int) $stock->quantity > 0) {
+                TrackingService::backInStock((int) $stock->id_product, (int) $stock->id_product_attribute, (int) $stock->quantity);
+            }
         }
     }
+
+    // ------------------------------------------------------------------
+    // Hooks: catalog sync -> Plunk (spec 5.4). Hooks only enqueue outbox
+    // rows - never call the Plunk API from a back-office request.
+    // ------------------------------------------------------------------
+
+    public function hookActionProductAdd(array $params): void
+    {
+        $this->catalogUpsertProduct((int) ($params['product']->id ?? $params['id_product'] ?? 0));
+    }
+
+    public function hookActionProductUpdate(array $params): void
+    {
+        $this->catalogUpsertProduct((int) ($params['product']->id ?? $params['id_product'] ?? 0));
+    }
+
+    public function hookActionObjectCombinationAddAfter(array $params): void
+    {
+        $this->catalogUpsertProduct($this->combinationProductId($params));
+    }
+
+    public function hookActionObjectCombinationUpdateAfter(array $params): void
+    {
+        $this->catalogUpsertProduct($this->combinationProductId($params));
+    }
+
+    public function hookActionObjectCombinationDeleteAfter(array $params): void
+    {
+        if (!Config::getBool(Config::FEAT_CATALOG_SYNC)) {
+            return;
+        }
+        $combo = $params['object'] ?? null;
+        $idProduct = (int) ($combo->id_product ?? 0);
+        $idAttr = (int) ($combo->id ?? 0);
+        if ($idProduct > 0 && $idAttr > 0) {
+            Outbox::enqueue('catalog.delete', ['ids' => [PlunkConnect\Mapper\CatalogMapper::plunkId($idProduct, $idAttr)]], 'catalog.delete:' . $idProduct);
+        }
+    }
+
+    /** Collect Plunk ids (incl. combinations) before the product rows vanish. */
+    public function hookActionObjectProductDeleteBefore(array $params): void
+    {
+        $product = $params['object'] ?? null;
+        $idProduct = (int) ($product->id ?? 0);
+        if ($idProduct > 0) {
+            $idShop = (int) Context::getContext()->shop->id;
+            $this->deletingProductIds[$idProduct] = (new PlunkConnect\Mapper\CatalogMapper())->plunkIds($idProduct, $idShop);
+        }
+    }
+
+    public function hookActionProductDelete(array $params): void
+    {
+        if (!Config::getBool(Config::FEAT_CATALOG_SYNC)) {
+            return;
+        }
+        $idProduct = (int) ($params['product']->id ?? $params['id_product'] ?? 0);
+        $ids = $this->deletingProductIds[$idProduct] ?? null;
+        if (null === $ids) {
+            // Fallback: parent only (combination rows may already be gone).
+            $ids = $idProduct > 0 ? [(string) $idProduct] : [];
+        }
+        if ($ids) {
+            Outbox::enqueue('catalog.delete', ['ids' => $ids], 'catalog.delete:' . $idProduct);
+        }
+    }
+
+    public function hookActionObjectSpecificPriceAddAfter(array $params): void
+    {
+        $this->catalogPatchProduct($this->specificPriceProductId($params), 0);
+    }
+
+    public function hookActionObjectSpecificPriceUpdateAfter(array $params): void
+    {
+        $this->catalogPatchProduct($this->specificPriceProductId($params), 0);
+    }
+
+    public function hookActionObjectSpecificPriceDeleteAfter(array $params): void
+    {
+        $this->catalogPatchProduct($this->specificPriceProductId($params), 0);
+    }
+
+    private function combinationProductId(array $params): int
+    {
+        $object = $params['object'] ?? null;
+
+        return (int) ($object->id_product ?? 0);
+    }
+
+    private function specificPriceProductId(array $params): int
+    {
+        $object = $params['object'] ?? null;
+
+        return (int) ($object->id_product ?? 0);
+    }
+
+    private function catalogUpsertProduct(int $idProduct): void
+    {
+        if ($idProduct <= 0 || !Config::getBool(Config::FEAT_CATALOG_SYNC)) {
+            return;
+        }
+        Outbox::enqueue('catalog.upsert', ['ids' => [$idProduct]], 'catalog.upsert:p' . $idProduct);
+    }
+
+    private function catalogPatchProduct(int $idProduct, int $idAttr): void
+    {
+        if ($idProduct <= 0 || !Config::getBool(Config::FEAT_CATALOG_SYNC)) {
+            return;
+        }
+        $idShop = (int) Context::getContext()->shop->id;
+        foreach ((new PlunkConnect\Mapper\CatalogMapper())->plunkIds($idProduct, $idShop) as $plunkId) {
+            if ($idAttr > 0 && $plunkId !== PlunkConnect\Mapper\CatalogMapper::plunkId($idProduct, $idAttr)) {
+                continue; // quantity hooks name the exact combination
+            }
+            Outbox::enqueue('catalog.patch', ['id' => $plunkId], 'catalog.patch:' . $plunkId, 60);
+        }
+    }
+
+    /** @var array<int, string[]> plunk ids collected in DeleteBefore hooks */
+    private array $deletingProductIds = [];
 
     // ------------------------------------------------------------------
     // Hooks: GDPR + cron
@@ -323,6 +459,20 @@ class Plunkconnect extends Module
         $processor = new OutboxProcessor();
         $processor->process(100, 20);
         $processor->cleanup(1);
+
+        if (!Config::getBool(Config::FEAT_CATALOG_SYNC)) {
+            return;
+        }
+        $idShop = (int) Context::getContext()->shop->id;
+        $lastSync = strtotime((string) Config::get(Config::CATALOG_LAST_SYNC, '1970-01-01', $idShop)) ?: 0;
+        $lastFull = strtotime((string) Config::get(Config::CATALOG_FULL_SYNC_AT, '1970-01-01', $idShop)) ?: 0;
+        $hour = (int) date('G');
+        // Nightly full sync between 03:00 and 05:00, max once per 20 h.
+        if ($hour >= 3 && $hour <= 5 && time() - $lastFull > 20 * 3600) {
+            PlunkConnect\Service\CatalogSyncService::queueFull($idShop);
+        } elseif (time() - $lastSync > 14 * 60) {
+            PlunkConnect\Service\CatalogSyncService::queueIncremental($idShop);
+        }
     }
 
     /**
@@ -358,6 +508,14 @@ class Plunkconnect extends Module
             $n = Outbox::retryDead();
             $output .= $this->displayConfirmation(sprintf($this->l('%d dead rows requeued.'), $n));
         }
+        if (Tools::isSubmit('plunkCatalogSyncNow')) {
+            $stats = PlunkConnect\Service\CatalogSyncService::queueFull((int) Context::getContext()->shop->id);
+            $output .= $this->displayConfirmation(sprintf(
+                $this->l('Catalog sync queued: %d batch(es), %d product(s).'),
+                $stats['batches'],
+                $stats['products']
+            ));
+        }
         if (Tools::isSubmit('plunkProcessNow')) {
             $stats = (new OutboxProcessor())->process(50, 20);
             $output .= $this->displayConfirmation(sprintf(
@@ -388,7 +546,8 @@ class Plunkconnect extends Module
         }
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
-            Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE] as $key) {
+            Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
+            Config::FEAT_CATALOG_SYNC] as $key) {
             Config::set($key, (int) (bool) Tools::getValue($key));
         }
 
@@ -446,6 +605,18 @@ class Plunkconnect extends Module
             . '<form method="post" style="display:inline"><button class="btn btn-default" name="plunkRetryDead" value="1">'
             . $this->l('Retry dead') . '</button></form>'
             . '</div></div>';
+
+        if (Config::getBool(Config::FEAT_CATALOG_SYNC)) {
+            $idShop = (int) Context::getContext()->shop->id;
+            $lastSync = (string) Config::get(Config::CATALOG_LAST_SYNC, '', $idShop);
+            $lastFull = (string) Config::get(Config::CATALOG_FULL_SYNC_AT, '', $idShop);
+            $html .= '<div class="panel"><h4>' . $this->l('Catalog sync') . '</h4>'
+                . '<p>' . $this->l('Last incremental') . ': <code>' . htmlspecialchars('' === $lastSync ? '(never)' : $lastSync) . '</code>'
+                . ' &middot; ' . $this->l('Last full') . ': <code>' . htmlspecialchars('' === $lastFull ? '(never)' : $lastFull) . '</code></p>'
+                . '<form method="post" style="display:inline"><button class="btn btn-default" name="plunkCatalogSyncNow" value="1">'
+                . $this->l('Full sync now') . '</button></form> '
+                . '<span class="help-block">' . $this->l('Queues catalog.upsert outbox rows; the worker sends them.') . '</span></div>';
+        }
 
         if ($errors) {
             $html .= '<table class="table"><thead><tr><th>#</th><th>' . $this->l('Endpoint')
@@ -613,6 +784,7 @@ class Plunkconnect extends Module
             [Config::FEAT_COUPONS, 'Coupon endpoint (replaces newsmancoupons)'],
             [Config::FEAT_BACKINSTOCK, 'Back-in-stock events (ps_emailalerts)'],
             [Config::FEAT_PK_CAPTURE, 'Identify visitors from Plunk email clicks (?pk_e=)'],
+            [Config::FEAT_CATALOG_SYNC, 'Catalog sync to Plunk (products -> /catalog/products)'],
         ];
 
         $inputs = [];
@@ -651,7 +823,8 @@ class Plunkconnect extends Module
         ];
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
-            Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE] as $key) {
+            Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
+            Config::FEAT_CATALOG_SYNC] as $key) {
             $values[$key] = (int) Config::getBool($key);
         }
         foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {

@@ -29,8 +29,10 @@ final class Outbox
      * @param string|null $dedupeKey when set, an existing pending row with the
      *                               same key is updated in place instead of
      *                               adding a new one (cart spam collapse)
+     * @param int $delaySeconds schedule first/next attempt N seconds from now
+     *                          (catalog.patch merges bursts over ~60 s)
      */
-    public static function enqueue(string $endpoint, array $payload, ?string $dedupeKey = null): bool
+    public static function enqueue(string $endpoint, array $payload, ?string $dedupeKey = null, int $delaySeconds = 0): bool
     {
         $idShop = (int) (\Context::getContext()->shop->id ?? 0);
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -38,6 +40,7 @@ final class Outbox
             return false;
         }
         $now = date('Y-m-d H:i:s');
+        $attemptAt = date('Y-m-d H:i:s', time() + $delaySeconds);
         $table = _DB_PREFIX_ . self::TABLE;
 
         if (null !== $dedupeKey) {
@@ -46,7 +49,7 @@ final class Outbox
                 'UPDATE `' . $table . '`
                  SET `payload` = \'' . pSQL($json) . '\',
                      `uuid` = \'' . pSQL(self::uuid()) . '\',
-                     `next_attempt_at` = \'' . pSQL($now) . '\',
+                     `next_attempt_at` = \'' . pSQL($attemptAt) . '\',
                      `date_upd` = \'' . pSQL($now) . '\',
                      `last_error` = NULL
                  WHERE `dedupe_key` = \'' . pSQL($dedupeKey) . '\'
@@ -71,7 +74,7 @@ final class Outbox
                 \'' . pSQL($json) . '\',
                 \'' . pSQL(self::STATUS_PENDING) . '\',
                 0,
-                \'' . pSQL($now) . '\',
+                \'' . pSQL($attemptAt) . '\',
                 \'' . pSQL($now) . '\',
                 \'' . pSQL($now) . '\')'
         );

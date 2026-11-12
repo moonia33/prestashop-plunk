@@ -71,6 +71,16 @@ Masyvai (`product`, `cart`, `order`) siunčiami kaip `{value:…, persistent:fal
 - `plunkconnect:subscribers:reconcile` – tik raportuoja neatitikimus
 - `plunkconnect:coupons:cleanup [--dry-run]` – trina pasibaigusius nepanaudotus modulio kuponus (`CartRule` + `plunk_coupon`)
 
+### Katalogo sinchronizacija -> Plunk (`/catalog/products`)
+
+- `FEAT_CATALOG_SYNC` (admin) jungia sinchronizaciją. Visi pakeitimai eina per outbox – hook'ai tik įdeda eilės įrašus (<5 ms), API kvietimų užklausų metu nėra.
+- `catalog.upsert` – `PUT /catalog/products` (`{"products":[…]}`), <=500 įrašų užklausai (kombinacijos skaičiuojamos); `catalog.patch` – `PATCH` tik `id/price/salePrice/available/quantity` <=1000, su 60 s suliejimu; `catalog.delete` – `POST /catalog/products/delete` <=1000 id.
+- Produkto `id` visur vienodas: `"<id_product>"` arba `"<id_product>-<id_product_attribute>"`; kombinacija turi `parentId`.
+- `PUT` perrašo viską (neatsiųsti laukai Plunk'e ištrinami); `PATCH` keičia tik nurodytus laukus. Išjungti produktai siunčiami su `available:false`, ne trinami.
+- Komanda: `php bin/console plunkconnect:catalog:sync [--full] [--from=<id>]`. Inkrementinis – `date_upd` + `specific_price` aktyvavimosi/pasibaigimo langai (kaina gali keistis nekeičiant `date_upd`). Cron: kas ~15 min inkrementinis, 03:00–05:00 pilnas (nebūtinas, jei naudojamas išorinis cron).
+- Admin „Full sync now" tik užsarašo outbox eilę – nieko nesiunčia sinchroniškai.
+- Autentifikacija – `Authorization: Bearer <sk_>`; 4xx (išskyrus 408/429) → dead, 408/429/5xx → retry.
+
 ### Pastabos Plunk workflow'ams
 
 - WEBHOOK žingsnis: jei Plunk nemoka skaičiuoti HMAC, naudokite statinę antraštę `Authorization: Bearer <webhook secret>`.
