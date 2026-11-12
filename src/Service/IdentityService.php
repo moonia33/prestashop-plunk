@@ -96,14 +96,15 @@ final class IdentityService
     }
 
     /**
-     * Anonymous views: keep last N product ids in the (encrypted) PS cookie.
+     * Anonymous views: keep last N Plunk product ids ("<id>" or
+     * "<id>-<attr>") in the (encrypted) PS cookie.
      */
-    public static function recordAnonymousView(int $idProduct): void
+    public static function recordAnonymousView(string $plunkId): void
     {
         $context = \Context::getContext();
         $list = self::anonymousViews();
-        $list = array_values(array_filter($list, fn ($id) => $id !== $idProduct));
-        $list[] = $idProduct;
+        $list = array_values(array_filter($list, fn ($id) => $id !== $plunkId));
+        $list[] = $plunkId;
         $context->cookie->{self::ANON_COOKIE} = json_encode(array_slice($list, -self::ANON_MAX));
     }
 
@@ -125,7 +126,7 @@ final class IdentityService
         $raw = isset($context->cookie->{self::ANON_COOKIE}) ? (string) $context->cookie->{self::ANON_COOKIE} : '';
         $decoded = '' !== $raw ? json_decode($raw, true) : [];
 
-        return is_array($decoded) ? array_values(array_map('intval', $decoded)) : [];
+        return is_array($decoded) ? array_values(array_map('strval', $decoded)) : [];
     }
 
     /**

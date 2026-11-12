@@ -208,6 +208,10 @@ final class ProductMapper
         $path = [];
         $seen = [];
         $current = $idCategory;
+        $skipIds = array_filter([
+            (int) \Configuration::get('PS_ROOT_CATEGORY'),
+            (int) \Configuration::get('PS_HOME_CATEGORY'),
+        ]);
         while ($current > 0 && count($path) < $maxDepth && !isset($seen[$current])) {
             $seen[$current] = true;
             $row = \Db::getInstance()->getRow(
@@ -221,7 +225,8 @@ final class ProductMapper
             if (!$row) {
                 break;
             }
-            if (!empty($row['name'])) {
+            // Skip Root/Home pseudo-categories, same rule as CatalogMapper.
+            if (!empty($row['name']) && !in_array($current, $skipIds, true)) {
                 $path[] = (string) $row['name'];
             }
             $current = (int) $row['id_parent'];

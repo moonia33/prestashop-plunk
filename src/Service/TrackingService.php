@@ -41,8 +41,9 @@ final class TrackingService
 
         if ('product' === $phpSelf) {
             $idProduct = (int) \Tools::getValue('id_product');
+            $idAttr = (int) \Tools::getValue('id_product_attribute');
             if ($idProduct > 0) {
-                self::productViewed($idProduct, $idShop, $idLang);
+                self::productViewed($idProduct, $idShop, $idLang, $idAttr);
             }
         } elseif ('category' === $phpSelf) {
             $idCategory = (int) \Tools::getValue('id_category');
@@ -88,25 +89,26 @@ final class TrackingService
         ], 'checkout:' . (int) $cart->id);
     }
 
-    public static function productViewed(int $idProduct, int $idShop, int $idLang): void
+    public static function productViewed(int $idProduct, int $idShop, int $idLang, int $idProductAttribute = 0): void
     {
+        $plunkId = \PlunkConnect\Mapper\CatalogMapper::plunkId($idProduct, $idProductAttribute);
         $email = IdentityService::email();
         if (!$email) {
-            IdentityService::recordAnonymousView($idProduct);
+            IdentityService::recordAnonymousView($plunkId);
 
             return;
         }
         if (!self::viewDebounceAllows($email, $idProduct)) {
             return;
         }
-        $product = (new ProductMapper())->mapProduct($idProduct, $idShop, $idLang);
+        $product = (new ProductMapper())->mapProduct($idProduct, $idShop, $idLang, $idProductAttribute);
         if (!$product) {
             return;
         }
 
         $data = CustomerMapper::base($idLang, $idShop);
         $data['lastViewedAt'] = gmdate('Y-m-d\TH:i:s\Z');
-        $data['recentlyViewed'] = self::mergeRecentlyViewed($email, $idProduct);
+        $data['recentlyViewed'] = self::mergeRecentlyViewed($email, $plunkId);
         $data['product'] = ['value' => $product, 'persistent' => false];
 
         Outbox::enqueue('track', [
@@ -301,8 +303,10 @@ final class TrackingService
         $idShop = (int) (\Context::getContext()->shop->id ?? 0);
         $products = [];
         $mapper = new ProductMapper();
-        foreach (array_slice($views, -10) as $idProduct) {
-            $p = $mapper->mapProduct($idProduct, $idShop, $idLang);
+        $catalog = new \PlunkConnect\Mapper\CatalogMapper();
+        foreach (array_slice($views, -10) as $plunkId) {
+            [$idProduct, $idAttr] = $catalog->splitPlunkId((string) $plunkId);
+            $p = $idProduct > 0 ? $mapper->mapProduct($idProduct, $idShop, $idLang, $idAttr) : null;
             if ($p) {
                 $products[] = $p;
             }
@@ -312,7 +316,8 @@ final class TrackingService
         }
 
         $data = CustomerMapper::base($idLang, $idShop);
-        $data['recentlyViewed'] = array_column($products, 'id');
+        // String plunk ids ("<id>" or "<id>-<attr>") to match the catalog.
+        $data['recentlyViewed'] = array_column($products, 'productId');
         $data['lastViewedAt'] = gmdate('Y-m-d\TH:i:s\Z');
         $data['products'] = ['value' => $products, 'persistent' => false];
 
@@ -393,17 +398,23 @@ final class TrackingService
         return true;
     }
 
-    private static function mergeRecentlyViewed(string $email, int $idProduct): array
+    /**
+     * Recently-viewed list kept in the visitor cookie as Plunk id strings
+     * ("<id>" or "<id>-<attr>") so the payload matches the catalog.
+     *
+     * @return string[]
+     */
+    private static function mergeRecentlyViewed(string $email, string $plunkId): array
     {
         $context = \Context::getContext();
         $key = 'plunk_rv';
         $list = [];
         if (!empty($context->cookie->{$key})) {
             $decoded = json_decode((string) $context->cookie->{$key}, true);
-            $list = is_array($decoded) ? array_map('intval', $decoded) : [];
+            $list = is_array($decoded) ? array_map('strval', $decoded) : [];
         }
-        $list = array_values(array_filter($list, fn ($id) => $id !== $idProduct));
-        $list[] = $idProduct;
+        $list = array_values(array_filter($list, fn ($id) => $id !== $plunkId));
+        $list[] = $plunkId;
         $list = array_slice($list, -10);
         $context->cookie->{$key} = json_encode($list);
 

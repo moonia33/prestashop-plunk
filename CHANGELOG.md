@@ -11,6 +11,8 @@ All notable changes to `plunkconnect` are documented here.
 - `available` was `true` for out-of-stock products when `out_of_stock = 2`: mode 2 means "shop default", it now correctly resolves `PS_ORDER_OUT_OF_STOCK`.
 - All catalog images dropped (`imageUrl: null`): CLI `getImageLink()` returns `http://`/`//host` URLs; they are now normalised to `https://` when `PS_SSL_ENABLED` (`CatalogMapper::httpsUrl`).
 - `categories` included the Home category: `PS_ROOT_CATEGORY` and `PS_HOME_CATEGORY` are now excluded.
+- `categoryPath` in product events carried "Šakninis"/"Pagrindinis": the same Root/Home exclusion is applied.
+- Event `recentlyViewed` now carries Plunk id strings (`"<id>"` / `"<id>-<attr>"`) instead of ints; `product.viewed` and the anonymous-view buffer now record the selected combination (`id_product_attribute`) so `productId` is `"<id>-<attr>"`, matching the catalog ids.
 
 ### Added
 - Catalog sync to Plunk (`/catalog/products`, spec 5.4): `CatalogMapper` builds full product documents (canonical string ids `<id_product>` / `<id_product>-<id_product_attribute>`, `parentId`, sku, name, sanitized description <=1000 chars, HTTPS url with `#/<attr>` anchor, cover + up to 5 images, price/salePrice VAT-incl., `available`, `quantity`, brand, LT categories, `translations` for lv/pl/et/en skipping id_lang 5 and never sending `ru`).
