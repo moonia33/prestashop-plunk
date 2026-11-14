@@ -89,7 +89,7 @@ class BackfillOrdersCommand extends Command
                 if ($create) {
                     $payload['subscribed'] = false;
                 }
-                if (Outbox::enqueue($create ? 'contacts_ifnew' : 'contacts_ifexists', $payload, 'orders-backfill:' . md5($email), 0, $idShop)) {
+                if (Outbox::enqueue($create ? 'contacts_ifnew' : 'contacts_ifexists', $payload, 'orders-backfill:' . ($create ? 'create:' : 'existing:') . md5($email), 0, $idShop)) {
                     ++$queued;
                 }
             }
