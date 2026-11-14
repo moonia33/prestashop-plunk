@@ -8,9 +8,9 @@
  *   (= SKU) when filled and unique across all sellable units;
  * - otherwise, and for parents of combinations: "PS-<id_product>[-<attr>]".
  *
- * The id last sent to Plunk is stored in `plunk_catalog_id`, so a fixed
- * reference replaces the old catalog row (delete old + upsert new) and
- * ids coming back from Plunk resolve without guessing.
+ * The id last accepted by Plunk is stored in `plunk_catalog_id`, so a
+ * fixed reference replaces the old catalog row (upsert new, then delete
+ * old) and ids coming back from Plunk resolve without guessing.
  */
 
 namespace PlunkConnect\Catalog;
@@ -189,6 +189,29 @@ final class CatalogIds
         ) ?: [], 'external_id');
 
         return array_values(array_diff($stale, array_map('strval', $stillUsed)));
+    }
+
+    /**
+     * The given ids that a unit currently owns in the map table.
+     *
+     * @param string[] $externalIds
+     *
+     * @return string[]
+     */
+    public static function owned(array $externalIds, int $idShop): array
+    {
+        $owned = [];
+        foreach (array_chunk(array_values(array_unique($externalIds)), self::REF_CHUNK) as $chunk) {
+            $rows = \Db::getInstance()->executeS(
+                'SELECT `external_id` FROM `' . _DB_PREFIX_ . self::TABLE . '`
+                 WHERE `id_shop` = ' . $idShop . ' AND `external_id` IN (' . self::quoteList($chunk) . ')'
+            ) ?: [];
+            foreach ($rows as $row) {
+                $owned[] = (string) $row['external_id'];
+            }
+        }
+
+        return $owned;
     }
 
     /** Ids stored for a product (what Plunk has) - used before deletes. */

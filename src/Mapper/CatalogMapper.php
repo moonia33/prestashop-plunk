@@ -10,10 +10,12 @@
 namespace PlunkConnect\Mapper;
 
 use PlunkConnect\Catalog\CatalogIds;
-use PlunkConnect\Outbox\Outbox;
 
 final class CatalogMapper
 {
+    /** @var array<int, array<int, string>> ids of the last buildProducts() docs */
+    private array $sentIds = [];
+
     /** Shop languages that must never be used for catalog translations. */
     private const SKIP_LANG_IDS = [5];
 
@@ -121,13 +123,20 @@ final class CatalogMapper
             }
         }
 
-        // Ids that changed (e.g. a reference was fixed) replace the old rows.
-        $stale = CatalogIds::remember($sent, $idShop);
-        if ($stale) {
-            Outbox::enqueue('catalog.delete', ['ids' => $stale]);
-        }
+        $this->sentIds = $sent;
 
         return $docs;
+    }
+
+    /**
+     * [id_product => [id_attr => externalId]] of the last buildProducts()
+     * docs; pass to CatalogIds::remember() once Plunk accepted them.
+     *
+     * @return array<int, array<int, string>>
+     */
+    public function sentIds(): array
+    {
+        return $this->sentIds;
     }
 
     /**

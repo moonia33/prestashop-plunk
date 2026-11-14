@@ -251,8 +251,9 @@ final class OutboxProcessor
 
             case 'catalog.upsert':
                 // payload {ids:[id_product...]} -> full docs, PUT in <=500 chunks.
+                $idShop = (int) $row['id_shop'];
                 $mapper = new \PlunkConnect\Mapper\CatalogMapper();
-                $docs = $mapper->buildProducts(array_map('intval', (array) ($payload['ids'] ?? [])), (int) $row['id_shop']);
+                $docs = $mapper->buildProducts(array_map('intval', (array) ($payload['ids'] ?? [])), $idShop);
                 foreach (array_chunk($docs, self::UPSERT_CHUNK) as $i => $chunk) {
                     $result = $client->catalogUpsert($chunk, $row['uuid'] . '-' . $i);
                     $status = (int) ($result['status'] ?? 0);
@@ -261,11 +262,25 @@ final class OutboxProcessor
                     }
                 }
 
+                // Only after Plunk has the new rows: ids that changed (e.g. a
+                // reference was fixed) are recorded and the old rows removed.
+                $stale = CatalogIds::remember($mapper->sentIds(), $idShop);
+                foreach (array_chunk($stale, self::DELETE_CHUNK) as $i => $chunk) {
+                    $result = $client->catalogDelete($chunk, $row['uuid'] . '-stale-' . $i);
+                    $status = (int) ($result['status'] ?? 0);
+                    if ($status < 200 || $status >= 300) {
+                        Outbox::enqueue('catalog.delete', ['ids' => $chunk], null, 0, $idShop);
+                    }
+                }
+
                 return ['status' => 200, 'retryAfter' => null, 'error' => null];
 
             case 'catalog.delete':
                 // payload {ids:[plunkId...]} -> POST /catalog/products/delete.
+                // Ids a unit owns again at send time (a SKU moved to another
+                // product) are kept.
                 $ids = array_values(array_unique(array_map('strval', (array) ($payload['ids'] ?? []))));
+                $ids = array_values(array_diff($ids, CatalogIds::owned($ids, (int) $row['id_shop'])));
                 foreach (array_chunk($ids, self::DELETE_CHUNK) as $i => $chunk) {
                     $result = $client->catalogDelete($chunk, $row['uuid'] . '-' . $i);
                     $status = (int) ($result['status'] ?? 0);
