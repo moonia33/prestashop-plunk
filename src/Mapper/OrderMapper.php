@@ -77,7 +77,8 @@ final class OrderMapper
     public function contactAggregates(string $email, int $idShop): array
     {
         $db = \Db::getInstance();
-        $precision = \Context::getContext()->getComputingPrecision();
+        // CLI (backfill) has no context currency; EUR shops use 2 decimals.
+        $precision = null !== \Context::getContext()->currency ? \Context::getContext()->getComputingPrecision() : 2;
         $from = ' FROM `' . _DB_PREFIX_ . 'orders` o
              INNER JOIN `' . _DB_PREFIX_ . 'customer` c ON c.`id_customer` = o.`id_customer`
              WHERE c.`email` = \'' . pSQL($email) . '\' AND o.`id_shop` = ' . $idShop;
