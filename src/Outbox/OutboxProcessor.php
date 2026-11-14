@@ -12,6 +12,7 @@
 namespace PlunkConnect\Outbox;
 
 use PlunkConnect\Api\PlunkClient;
+use PlunkConnect\Catalog\CatalogIds;
 
 final class OutboxProcessor
 {
@@ -105,13 +106,19 @@ final class OutboxProcessor
                 break;
             }
             $docs = [];
-            $idShop = 0;
+            $idShop = (int) $groupRows[0]['id_shop'];
+            $plunkIds = [];
             foreach ($groupRows as $row) {
-                $idShop = (int) $row['id_shop'];
                 $payload = json_decode((string) $row['payload'], true);
                 $plunkId = is_array($payload) ? (string) ($payload['id'] ?? '') : '';
                 if ('' !== $plunkId) {
-                    $doc = $mapper->buildPatch($plunkId, $idShop);
+                    $plunkIds[] = $plunkId;
+                }
+            }
+            $units = CatalogIds::resolve($plunkIds, $idShop);
+            foreach ($plunkIds as $plunkId) {
+                if (isset($units[$plunkId])) {
+                    $doc = $mapper->buildPatch($plunkId, $idShop, $units[$plunkId]);
                     if (null !== $doc) {
                         $docs[$plunkId] = $doc;
                     }
@@ -121,7 +128,7 @@ final class OutboxProcessor
                 $clients[$idShop] = new PlunkClient($idShop);
             }
             $result = $docs
-                ? $this->catalogPatchAndRequeue($clients[$idShop], array_values($docs), (string) $groupRows[0]['uuid'])
+                ? $this->catalogPatchAndRequeue($clients[$idShop], array_values($docs), (string) $groupRows[0]['uuid'], $idShop)
                 : ['status' => 200, 'retryAfter' => null, 'error' => null];
             foreach ($groupRows as $row) {
                 $this->settle($row, $result, $stats);
@@ -269,14 +276,14 @@ final class OutboxProcessor
      * PATCH the merged docs; ids Plunk reports as notFound are requeued as
      * full upserts (they need every field, not just price/stock).
      */
-    private function catalogPatchAndRequeue(PlunkClient $client, array $docs, string $idempotencyKey): array
+    private function catalogPatchAndRequeue(PlunkClient $client, array $docs, string $idempotencyKey, int $idShop): array
     {
         $result = $client->catalogPatch($docs, $idempotencyKey);
         if ((int) ($result['status'] ?? 0) >= 200 && (int) ($result['status'] ?? 0) < 300
             && is_array($result['body']) && !empty($result['body']['notFound'])) {
             $ids = array_map(
-                fn ($plunkId) => (new \PlunkConnect\Mapper\CatalogMapper())->splitPlunkId((string) $plunkId)[0],
-                (array) $result['body']['notFound']
+                fn ($unit) => $unit[0],
+                CatalogIds::resolve(array_map('strval', (array) $result['body']['notFound']), $idShop)
             );
             $ids = array_values(array_unique(array_filter($ids)));
             if ($ids) {

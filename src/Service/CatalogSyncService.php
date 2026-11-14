@@ -12,6 +12,7 @@
 
 namespace PlunkConnect\Service;
 
+use PlunkConnect\Catalog\CatalogIds;
 use PlunkConnect\Config;
 use PlunkConnect\Outbox\Outbox;
 
@@ -88,15 +89,14 @@ final class CatalogSyncService
         ) ?: [], 'id_product'));
 
         $patch = 0;
-        $mapper = new \PlunkConnect\Mapper\CatalogMapper();
-        foreach ($spIds as $idProduct) {
-            if (in_array($idProduct, $changed, true)) {
-                continue; // already covered by the upsert rows
+        $spIds = array_values(array_diff($spIds, $changed)); // upserts already cover the rest
+        foreach (array_chunk($spIds, self::UPSERT_BATCH) as $chunk) {
+            foreach (CatalogIds::forProducts($chunk, $idShop) as $units) {
+                foreach ($units as $plunkId) {
+                    Outbox::enqueue('catalog.patch', ['id' => $plunkId], 'catalog.patch:' . $plunkId, 60);
+                }
+                ++$patch;
             }
-            foreach ($mapper->plunkIds($idProduct, $idShop) as $plunkId) {
-                Outbox::enqueue('catalog.patch', ['id' => $plunkId], 'catalog.patch:' . $plunkId, 60);
-            }
-            ++$patch;
         }
 
         Config::set(Config::CATALOG_LAST_SYNC, $now);

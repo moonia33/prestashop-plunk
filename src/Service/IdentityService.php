@@ -96,8 +96,8 @@ final class IdentityService
     }
 
     /**
-     * Anonymous views: keep last N Plunk product ids ("<id>" or
-     * "<id>-<attr>") in the (encrypted) PS cookie.
+     * Anonymous views: keep last N product ids ("PS-<id>[-<attr>]") in the
+     * (encrypted) PS cookie.
      */
     public static function recordAnonymousView(string $plunkId): void
     {

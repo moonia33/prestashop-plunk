@@ -9,18 +9,11 @@
 
 namespace PlunkConnect\Mapper;
 
+use PlunkConnect\Catalog\CatalogIds;
+use PlunkConnect\Outbox\Outbox;
+
 final class CatalogMapper
 {
-    /**
-     * Plunk-wide product id: "<id_product>" or "<id_product>-<attr>".
-     * The same format is used by catalog, events, recommendations,
-     * back-in-stock and delete payloads.
-     */
-    public static function plunkId(int $idProduct, int $idProductAttribute = 0): string
-    {
-        return (string) $idProduct . ($idProductAttribute > 0 ? '-' . $idProductAttribute : '');
-    }
-
     /** Shop languages that must never be used for catalog translations. */
     private const SKIP_LANG_IDS = [5];
 
@@ -71,6 +64,8 @@ final class CatalogMapper
         $categories = $this->categoryNames($idShop, $baseLangId);
         $productCats = $this->productCategories($ids);
         $translations = $this->translations($ids, $idShop, array_keys($langs));
+        $catalogIds = CatalogIds::forProducts($ids, $idShop, true);
+        $sent = [];
 
         $docs = [];
         foreach ($products as $row) {
@@ -85,9 +80,10 @@ final class CatalogMapper
                     $catNames[] = $categories[$idCat];
                 }
             }
+            $parentId = $catalogIds[$idProduct][0] ?? CatalogIds::fallback($idProduct);
             $doc = $this->productDoc(
                 $row,
-                (string) $idProduct,
+                $parentId,
                 null,
                 $images[$idProduct] ?? [],
                 $stocks[$idProduct][0] ?? 0,
@@ -99,12 +95,15 @@ final class CatalogMapper
             );
             if (null !== $doc) {
                 $docs[] = $doc;
+                $sent[$idProduct][0] = $parentId;
             }
             // Combination docs reference the parent id.
             foreach ($combos[$idProduct] ?? [] as $combo) {
+                $idAttr = (int) $combo['id_product_attribute'];
+                $comboId = $catalogIds[$idProduct][$idAttr] ?? CatalogIds::fallback($idProduct, $idAttr);
                 $comboDoc = $this->productDoc(
                     $row,
-                    self::plunkId($idProduct, (int) $combo['id_product_attribute']),
+                    $comboId,
                     $combo,
                     $images[$idProduct] ?? [],
                     (int) $combo['quantity'],
@@ -115,24 +114,32 @@ final class CatalogMapper
                     $baseLangId
                 );
                 if (null !== $comboDoc) {
-                    $comboDoc['parentId'] = (string) $idProduct;
+                    $comboDoc['parentId'] = $parentId;
                     $docs[] = $comboDoc;
+                    $sent[$idProduct][$idAttr] = $comboId;
                 }
             }
+        }
+
+        // Ids that changed (e.g. a reference was fixed) replace the old rows.
+        $stale = CatalogIds::remember($sent, $idShop);
+        if ($stale) {
+            Outbox::enqueue('catalog.delete', ['ids' => $stale]);
         }
 
         return $docs;
     }
 
     /**
-     * Lightweight PATCH document for one Plunk product id
-     * ("<id_product>" or "<id_product>-<id_product_attribute>").
+     * Lightweight PATCH document for one Plunk catalog id.
+     *
+     * @param array{0:int,1:int}|null $unit [id_product, id_attr] when already resolved
      *
      * @return array{id:string,price:float,salePrice:?float,available:bool,quantity:int}|null
      */
-    public function buildPatch(string $plunkId, int $idShop): ?array
+    public function buildPatch(string $plunkId, int $idShop, ?array $unit = null): ?array
     {
-        [$idProduct, $idAttribute] = $this->splitPlunkId($plunkId);
+        [$idProduct, $idAttribute] = $unit ?? CatalogIds::resolve([$plunkId], $idShop)[$plunkId] ?? [0, 0];
         if ($idProduct <= 0) {
             return null;
         }
@@ -164,34 +171,6 @@ final class CatalogMapper
             'available' => self::isAvailable($row, $quantity),
             'quantity' => max(0, $quantity),
         ];
-    }
-
-    /**
-     * All Plunk ids for a product (parent + combos) - used by delete flows.
-     *
-     * @return string[]
-     */
-    public function plunkIds(int $idProduct, int $idShop): array
-    {
-        $ids = [(string) $idProduct];
-        $combos = $this->combinationsByProduct([$idProduct], $idShop);
-        foreach ($combos[$idProduct] ?? [] as $combo) {
-            $ids[] = self::plunkId($idProduct, (int) $combo['id_product_attribute']);
-        }
-
-        return $ids;
-    }
-
-    /**
-     * @return array{0:int,1:int} [id_product, id_product_attribute]
-     */
-    public function splitPlunkId(string $plunkId): array
-    {
-        if (preg_match('/^(\d+)-(\d+)$/', $plunkId, $m)) {
-            return [(int) $m[1], (int) $m[2]];
-        }
-
-        return [(int) $plunkId, 0];
     }
 
     // ------------------------------------------------------------------

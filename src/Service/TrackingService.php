@@ -7,6 +7,7 @@
 
 namespace PlunkConnect\Service;
 
+use PlunkConnect\Catalog\CatalogIds;
 use PlunkConnect\Config;
 use PlunkConnect\Mapper\CartMapper;
 use PlunkConnect\Mapper\CustomerMapper;
@@ -91,10 +92,10 @@ final class TrackingService
 
     public static function productViewed(int $idProduct, int $idShop, int $idLang, int $idProductAttribute = 0): void
     {
-        $plunkId = \PlunkConnect\Mapper\CatalogMapper::plunkId($idProduct, $idProductAttribute);
         $email = IdentityService::email();
         if (!$email) {
-            IdentityService::recordAnonymousView($plunkId);
+            // Internal id only; resolved to catalog ids when the visitor is identified.
+            IdentityService::recordAnonymousView(CatalogIds::fallback($idProduct, $idProductAttribute));
 
             return;
         }
@@ -108,7 +109,7 @@ final class TrackingService
 
         $data = CustomerMapper::base($idLang, $idShop);
         $data['lastViewedAt'] = gmdate('Y-m-d\TH:i:s\Z');
-        $data['recentlyViewed'] = self::mergeRecentlyViewed($email, $plunkId);
+        $data['recentlyViewed'] = self::mergeRecentlyViewed($email, (string) $product['productId']);
         $data['product'] = ['value' => $product, 'persistent' => false];
 
         Outbox::enqueue('track', [
@@ -303,9 +304,10 @@ final class TrackingService
         $idShop = (int) (\Context::getContext()->shop->id ?? 0);
         $products = [];
         $mapper = new ProductMapper();
-        $catalog = new \PlunkConnect\Mapper\CatalogMapper();
-        foreach (array_slice($views, -10) as $plunkId) {
-            [$idProduct, $idAttr] = $catalog->splitPlunkId((string) $plunkId);
+        $views = array_map('strval', array_slice($views, -10));
+        $units = CatalogIds::resolve($views, $idShop);
+        foreach ($views as $plunkId) {
+            [$idProduct, $idAttr] = $units[$plunkId] ?? [0, 0];
             $p = $idProduct > 0 ? $mapper->mapProduct($idProduct, $idShop, $idLang, $idAttr) : null;
             if ($p) {
                 $products[] = $p;
@@ -316,7 +318,7 @@ final class TrackingService
         }
 
         $data = CustomerMapper::base($idLang, $idShop);
-        // String plunk ids ("<id>" or "<id>-<attr>") to match the catalog.
+        // Catalog ids (SKU or PS-<id>[-<attr>]) to match the Plunk catalog.
         $data['recentlyViewed'] = array_column($products, 'productId');
         $data['lastViewedAt'] = gmdate('Y-m-d\TH:i:s\Z');
         $data['products'] = ['value' => $products, 'persistent' => false];
@@ -399,8 +401,8 @@ final class TrackingService
     }
 
     /**
-     * Recently-viewed list kept in the visitor cookie as Plunk id strings
-     * ("<id>" or "<id>-<attr>") so the payload matches the catalog.
+     * Recently-viewed list kept in the visitor cookie as Plunk catalog ids
+     * so the payload matches the catalog.
      *
      * @return string[]
      */
