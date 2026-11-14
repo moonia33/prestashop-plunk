@@ -362,7 +362,7 @@ class Plunkconnect extends Module
         if ($idProduct > 0 && $idAttr > 0) {
             $idShop = (int) Context::getContext()->shop->id;
             $plunkId = PlunkConnect\Catalog\CatalogIds::forUnit($idProduct, $idAttr, $idShop);
-            Outbox::enqueue('catalog.delete', ['ids' => [$plunkId]], 'catalog.delete:' . $plunkId);
+            Outbox::enqueue('catalog.delete', ['ids' => [$plunkId], 'product' => $idProduct], 'catalog.delete:' . $plunkId);
             PlunkConnect\Catalog\CatalogIds::forget($idShop, $idProduct, $idAttr);
         }
     }
@@ -397,7 +397,7 @@ class Plunkconnect extends Module
             ))) : [];
         }
         if ($ids) {
-            Outbox::enqueue('catalog.delete', ['ids' => $ids], 'catalog.delete:p' . $idProduct);
+            Outbox::enqueue('catalog.delete', ['ids' => $ids, 'product' => $idProduct], 'catalog.delete:p' . $idProduct);
             PlunkConnect\Catalog\CatalogIds::forget($idShop, $idProduct);
         }
     }

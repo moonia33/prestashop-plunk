@@ -192,26 +192,26 @@ final class CatalogIds
     }
 
     /**
-     * The given ids that a unit currently owns in the map table.
+     * externalId => id_product currently owning it in the map table.
      *
      * @param string[] $externalIds
      *
-     * @return string[]
+     * @return array<string, int>
      */
-    public static function owned(array $externalIds, int $idShop): array
+    public static function owners(array $externalIds, int $idShop): array
     {
-        $owned = [];
+        $owners = [];
         foreach (array_chunk(array_values(array_unique($externalIds)), self::REF_CHUNK) as $chunk) {
             $rows = \Db::getInstance()->executeS(
-                'SELECT `external_id` FROM `' . _DB_PREFIX_ . self::TABLE . '`
+                'SELECT `external_id`, `id_product` FROM `' . _DB_PREFIX_ . self::TABLE . '`
                  WHERE `id_shop` = ' . $idShop . ' AND `external_id` IN (' . self::quoteList($chunk) . ')'
             ) ?: [];
             foreach ($rows as $row) {
-                $owned[] = (string) $row['external_id'];
+                $owners[(string) $row['external_id']] = (int) $row['id_product'];
             }
         }
 
-        return $owned;
+        return $owners;
     }
 
     /** Ids stored for a product (what Plunk has) - used before deletes. */

@@ -276,12 +276,19 @@ final class OutboxProcessor
                 return ['status' => 200, 'retryAfter' => null, 'error' => null];
 
             case 'catalog.delete':
-                // payload {ids:[plunkId...], keepOwned?} -> POST /catalog/products/delete.
-                // Stale-id cleanup (keepOwned) skips ids a unit owns again at
-                // send time (a SKU moved to another product); hook deletes are final.
+                // payload {ids:[plunkId...], product?:id_product, keepOwned?}
+                // -> POST /catalog/products/delete. Ids another product owns
+                // by send time (a SKU moved) are kept: stale-id cleanup
+                // (keepOwned) keeps any owned id, a product delete keeps ids
+                // owned by a different product.
                 $ids = array_values(array_unique(array_map('strval', (array) ($payload['ids'] ?? []))));
-                if (!empty($payload['keepOwned'])) {
-                    $ids = array_values(array_diff($ids, CatalogIds::owned($ids, (int) $row['id_shop'])));
+                $deletedProduct = (int) ($payload['product'] ?? 0);
+                if (!empty($payload['keepOwned']) || $deletedProduct > 0) {
+                    $owners = CatalogIds::owners($ids, (int) $row['id_shop']);
+                    $ids = array_values(array_filter(
+                        $ids,
+                        fn ($id) => !isset($owners[$id]) || (empty($payload['keepOwned']) && $owners[$id] === $deletedProduct)
+                    ));
                 }
                 foreach (array_chunk($ids, self::DELETE_CHUNK) as $i => $chunk) {
                     $result = $client->catalogDelete($chunk, $row['uuid'] . '-' . $i);
