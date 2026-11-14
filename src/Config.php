@@ -29,6 +29,9 @@ final class Config
     /** JSON: {"paid":[2],"shipped":[4],...} mapping event => [id_order_state]. */
     public const ORDERSTATE_MAP = self::PREFIX . 'ORDERSTATE_MAP';
 
+    /** id_feature whose values are the shop's activities (e.g. "Žvejybos rūšis"); 0 = off. */
+    public const ACTIVITY_FEATURE_ID = self::PREFIX . 'ACTIVITY_FEATURE_ID';
+
     public const FEAT_SUBSCRIPTIONS = self::PREFIX . 'FEAT_SUBSCRIPTIONS';
     public const FEAT_DOUBLE_OPTIN = self::PREFIX . 'FEAT_DOUBLE_OPTIN';
     public const FEAT_VIEWS = self::PREFIX . 'FEAT_VIEWS';
@@ -54,7 +57,7 @@ final class Config
         self::API_URL, self::PUBLIC_KEY, self::SECRET_KEY,
         self::WEBHOOK_SECRET, self::FEED_TOKEN, self::CRON_TOKEN,
         self::COUPON_SECRET, self::COUPON_RULES,
-        self::LOCALE_MAP, self::LOCALE_FALLBACK, self::ORDERSTATE_MAP,
+        self::LOCALE_MAP, self::LOCALE_FALLBACK, self::ORDERSTATE_MAP, self::ACTIVITY_FEATURE_ID,
         self::FEAT_SUBSCRIPTIONS, self::FEAT_DOUBLE_OPTIN, self::FEAT_VIEWS,
         self::FEAT_CART, self::FEAT_ORDERS, self::FEAT_FEED, self::FEAT_COUPONS,
         self::FEAT_BACKINSTOCK, self::FEAT_PK_CAPTURE,

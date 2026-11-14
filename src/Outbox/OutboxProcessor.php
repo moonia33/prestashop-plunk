@@ -237,6 +237,23 @@ final class OutboxProcessor
 
                 return $client->upsertContact($payload, $row['uuid']);
 
+            case 'contacts_ifexists':
+                // Order backfill: enrich existing contacts only, never create
+                // one or change `subscribed`.
+                $lookup = isset($payload['email'])
+                    ? $client->lookupContactResponse((string) $payload['email'])
+                    : ['status' => 400, 'retryAfter' => null, 'error' => 'missing email'];
+                $lookupStatus = (int) ($lookup['status'] ?? 0);
+                if (404 === $lookupStatus) {
+                    return ['status' => 200, 'retryAfter' => null, 'error' => null];
+                }
+                if (200 !== $lookupStatus) {
+                    return $lookup;
+                }
+                unset($payload['subscribed']);
+
+                return $client->upsertContact($payload, $row['uuid']);
+
             case 'lookup_delete':
                 // GDPR erasure: resolve the contact id first, then delete.
                 $email = isset($payload['email']) ? (string) $payload['email'] : '';

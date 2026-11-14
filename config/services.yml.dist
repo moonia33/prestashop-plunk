@@ -12,6 +12,10 @@ services:
         class: PlunkConnect\Command\BackfillSubscribersCommand
         tags: ['console.command']
 
+    plunkconnect.command.orders_backfill:
+        class: PlunkConnect\Command\BackfillOrdersCommand
+        tags: ['console.command']
+
     plunkconnect.command.subscribers_reconcile:
         class: PlunkConnect\Command\ReconcileSubscribersCommand
         tags: ['console.command']
