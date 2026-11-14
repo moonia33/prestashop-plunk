@@ -163,6 +163,10 @@ final class CatalogMapper
         $quantity = (int) ($row['quantity'] ?? 0);
         $price = \Product::getPriceStatic($idProduct, true, $idAttribute, 2, null, false, false);
         $sale = \Product::getPriceStatic($idProduct, true, $idAttribute, 2, null, false, true);
+        if (null === $price) {
+            return null; // PS cannot price it (e.g. combination not in this shop)
+        }
+        $sale = (float) $sale;
 
         return [
             'id' => $plunkId,
@@ -202,6 +206,10 @@ final class CatalogMapper
         $precision = 2;
         $price = \Product::getPriceStatic($idProduct, true, $idAttribute, $precision, null, false, false);
         $sale = \Product::getPriceStatic($idProduct, true, $idAttribute, $precision, null, false, true);
+        if (null === $price) {
+            return null; // PS cannot price it (e.g. combination not in this shop)
+        }
+        $sale = (float) $sale;
 
         $url = \Context::getContext()->link->getProductLink($idProduct, null, null, null, $baseLangId);
         if ($idAttribute > 0) {

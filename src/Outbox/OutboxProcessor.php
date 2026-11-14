@@ -94,7 +94,12 @@ final class OutboxProcessor
             if (!isset($clients[$idShop])) {
                 $clients[$idShop] = new PlunkClient($idShop);
             }
-            $result = $this->dispatch($clients[$idShop], $row);
+            try {
+                $result = $this->dispatch($clients[$idShop], $row);
+            } catch (\Throwable $e) {
+                // One bad row must not stop the worker; it is retried with backoff.
+                $result = ['status' => 500, 'retryAfter' => null, 'error' => 'exception: ' . substr($e->getMessage(), 0, 400)];
+            }
             $this->settle($row, $result, $stats);
 
             usleep(self::REQUEST_DELAY_US);
@@ -115,21 +120,25 @@ final class OutboxProcessor
                     $plunkIds[] = $plunkId;
                 }
             }
-            $units = CatalogIds::resolve($plunkIds, $idShop);
-            foreach ($plunkIds as $plunkId) {
-                if (isset($units[$plunkId])) {
-                    $doc = $mapper->buildPatch($plunkId, $idShop, $units[$plunkId]);
-                    if (null !== $doc) {
-                        $docs[$plunkId] = $doc;
-                    }
-                }
-            }
             if (!isset($clients[$idShop])) {
                 $clients[$idShop] = new PlunkClient($idShop);
             }
-            $result = $docs
-                ? $this->catalogPatchAndRequeue($clients[$idShop], array_values($docs), (string) $groupRows[0]['uuid'], $idShop)
-                : ['status' => 200, 'retryAfter' => null, 'error' => null];
+            try {
+                $units = CatalogIds::resolve($plunkIds, $idShop);
+                foreach ($plunkIds as $plunkId) {
+                    if (isset($units[$plunkId])) {
+                        $doc = $mapper->buildPatch($plunkId, $idShop, $units[$plunkId]);
+                        if (null !== $doc) {
+                            $docs[$plunkId] = $doc;
+                        }
+                    }
+                }
+                $result = $docs
+                    ? $this->catalogPatchAndRequeue($clients[$idShop], array_values($docs), (string) $groupRows[0]['uuid'], $idShop)
+                    : ['status' => 200, 'retryAfter' => null, 'error' => null];
+            } catch (\Throwable $e) {
+                $result = ['status' => 500, 'retryAfter' => null, 'error' => 'exception: ' . substr($e->getMessage(), 0, 400)];
+            }
             foreach ($groupRows as $row) {
                 $this->settle($row, $result, $stats);
             }

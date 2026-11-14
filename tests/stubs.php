@@ -708,7 +708,7 @@ class Product extends ObjectModel
     {
     }
 
-    public static function getPriceStatic(int $idProduct, bool $withTaxes = true, $idProductAttribute = null, int $decimals = 6, ?int $divisor = null, bool $onlyReduction = false, bool $useReduction = false, int $quantity = 1, bool $forceAssociatedTax = false, $idCustomer = null, $idCart = null, $idAddress = null, &$specificPriceOutput = null, bool $withEcotax = true, bool $useGroupReduction = true, ?int $idCustomization = null, bool $useCustomerPrice = true, $idShop = null, bool $useTax = true): float
+    public static function getPriceStatic(int $idProduct, bool $withTaxes = true, $idProductAttribute = null, int $decimals = 6, ?int $divisor = null, bool $onlyReduction = false, bool $useReduction = false, int $quantity = 1, bool $forceAssociatedTax = false, $idCustomer = null, $idCart = null, $idAddress = null, &$specificPriceOutput = null, bool $withEcotax = true, bool $useGroupReduction = true, ?int $idCustomization = null, bool $useCustomerPrice = true, $idShop = null, bool $useTax = true): ?float
     {
         return 0.0;
     }
