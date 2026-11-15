@@ -186,8 +186,7 @@ final class CouponService
              WHERE `email` = \'' . pSQL($email) . '\'
                AND `rule` = \'' . pSQL($rule) . '\'
                AND `date_exp` > \'' . pSQL(date('Y-m-d H:i:s')) . '\'
-             ORDER BY `date_exp` DESC
-             LIMIT 1'
+             ORDER BY `date_exp` DESC'
         );
 
         return is_array($row) ? self::rowToResponse($row) : null;

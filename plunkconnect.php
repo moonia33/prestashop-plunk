@@ -63,7 +63,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.4.0';
+        $this->version = '1.4.1';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -304,6 +304,7 @@ class Plunkconnect extends Module
             TrackingService::orderPlaced($params);
         } catch (Throwable $e) {
             // Never block checkout.
+            self::logHookError('actionValidateOrder', $e);
         }
     }
 
@@ -313,6 +314,20 @@ class Plunkconnect extends Module
             TrackingService::orderStatusUpdated($params);
         } catch (Throwable $e) {
             // Never block BO actions.
+            self::logHookError('actionOrderStatusPostUpdate', $e);
+        }
+    }
+
+    private static function logHookError(string $hook, Throwable $e): void
+    {
+        try {
+            PrestaShopLogger::addLog(
+                'plunkconnect ' . $hook . ': ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 500),
+                3,
+                null,
+                'plunkconnect'
+            );
+        } catch (Throwable $ignored) {
         }
     }
 

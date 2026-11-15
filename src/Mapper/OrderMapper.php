@@ -25,7 +25,8 @@ final class OrderMapper
      */
     public function map(\Order $order, int $idShop, int $idLang, bool $isFirstOrder = false): array
     {
-        $precision = \Context::getContext()->getComputingPrecision();
+        // Payment webhooks and CLI may run without a context currency.
+        $precision = null !== \Context::getContext()->currency ? \Context::getContext()->getComputingPrecision() : 2;
         $items = [];
         foreach ((array) $order->getProducts() as $row) {
             $item = $this->products->mapLine(
@@ -49,7 +50,7 @@ final class OrderMapper
             'SELECT cr.`code` FROM `' . _DB_PREFIX_ . 'order_cart_rule` ocr
              INNER JOIN `' . _DB_PREFIX_ . 'cart_rule` cr ON cr.`id_cart_rule` = ocr.`id_cart_rule`
              WHERE ocr.`id_order` = ' . (int) $order->id . '
-             ORDER BY ocr.`id_order_cart_rule` LIMIT 1'
+             ORDER BY ocr.`id_order_cart_rule`'
         );
 
         return [
