@@ -2,6 +2,12 @@
 
 All notable changes to `plunkconnect` are documented here.
 
+## [1.4.0] - 2026-11-15
+
+### Added
+- Plunk signup forms: with `FEAT_FORMS` on (off by default), `displayHeader` prints `window.PlunkForms` (`key`, `locale`, `subscribed`, `customer`) and the Plunk `forms/embed.js` script. Forms and their display rules are managed in Plunk.
+- `upgrade-1.4.0`: registers `displayHeader`.
+
 ## [1.3.0] - 2026-11-14
 
 ### Changed
