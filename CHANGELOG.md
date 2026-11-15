@@ -2,6 +2,13 @@
 
 All notable changes to `plunkconnect` are documented here.
 
+## [1.4.1] - 2026-11-15
+
+### Fixed
+- `order.placed` and `order.<status>` events were never queued: the coupon lookup in `OrderMapper::map()` added `LIMIT 1` to a `Db::getValue()` query, which appends its own `LIMIT 1`, so MariaDB rejected the SQL and the hook swallowed the error. The same fix applies to the coupon reuse lookup in `CouponService`.
+- `OrderMapper::map()` no longer fails when the context has no currency (payment webhooks, CLI); it falls back to 2 decimals.
+- Errors in order hooks are now written to the PrestaShop log (Advanced Parameters → Logs) instead of being dropped silently.
+
 ## [1.4.0] - 2026-11-15
 
 ### Added
