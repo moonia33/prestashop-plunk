@@ -5,7 +5,7 @@ All notable changes to `plunkconnect` are documented here.
 ## [1.5.0] - 2026-11-15
 
 ### Added
-- Contact form protection for the `contactform` module (`FEAT_CONTACT_TURNSTILE`, off by default). The Turnstile widget renders through `displayGDPRConsent`, only inside the contact form. `actionFrontControllerInitAfter` checks the token with Siteverify before contactform handles the POST: `success`, action `contact_form` and hostname against `TURNSTILE_HOSTNAMES` (empty = shop domains). If Siteverify cannot be reached, the message is rejected (fail closed). It also limits each IP to 3 messages per 10 min and each email to 5 per day. A rejected submission is not stored or mailed; the visitor sees a localized error and keeps the typed text.
+- Contact form protection for the `contactform` module (`FEAT_CONTACT_TURNSTILE`, off by default). The Turnstile widget renders through `displayGDPRConsent`, only inside the contact form. `actionFrontControllerInitAfter` checks the token with Siteverify before contactform handles the POST: `success`, action `contact_form` and hostname against `TURNSTILE_HOSTNAMES` (empty = the shop's own domains). If Siteverify cannot be reached, the message is rejected (fail closed). It also limits each IP to 3 messages per 10 min and each email to 5 per day, per shop. A rejected submission is not stored or mailed; the visitor sees a localized error and keeps the typed text.
 - Site key, write-only secret and hostnames are stored per shop, so each shop or client uses its own widget.
 - `upgrade-1.5.0`: registers both hooks.
 

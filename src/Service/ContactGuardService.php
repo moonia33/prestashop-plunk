@@ -152,7 +152,9 @@ final class ContactGuardService
             return $configured;
         }
 
-        return self::parseHostnames((string) \Configuration::get('PS_SHOP_DOMAIN') . ',' . (string) \Configuration::get('PS_SHOP_DOMAIN_SSL'));
+        $shop = \Context::getContext()->shop ?? null;
+
+        return self::parseHostnames((string) ($shop->domain ?? '') . ',' . (string) ($shop->domain_ssl ?? ''));
     }
 
     /**
@@ -176,12 +178,14 @@ final class ContactGuardService
     private static function overLimit(string $ip, string $email): bool
     {
         $db = \Db::getInstance();
+        $idShop = (int) (\Context::getContext()->shop->id ?? 0);
         $long = ip2long($ip);
         if (false !== $long) {
             $recent = (int) $db->getValue(
-                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer_message`
-                 WHERE `ip_address` = \'' . pSQL((string) $long) . '\'
-                   AND `date_add` > \'' . pSQL(date('Y-m-d H:i:s', time() - 600)) . '\''
+                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer_message` cm
+                 INNER JOIN `' . _DB_PREFIX_ . 'customer_thread` ct ON ct.`id_customer_thread` = cm.`id_customer_thread`
+                 WHERE cm.`ip_address` = \'' . pSQL((string) $long) . '\' AND ct.`id_shop` = ' . $idShop . '
+                   AND cm.`date_add` > \'' . pSQL(date('Y-m-d H:i:s', time() - 600)) . '\''
             );
             if ($recent >= self::MAX_PER_IP_10MIN) {
                 return true;
@@ -191,7 +195,7 @@ final class ContactGuardService
             $daily = (int) $db->getValue(
                 'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer_message` cm
                  INNER JOIN `' . _DB_PREFIX_ . 'customer_thread` ct ON ct.`id_customer_thread` = cm.`id_customer_thread`
-                 WHERE ct.`email` = \'' . pSQL($email) . '\' AND cm.`id_employee` = 0
+                 WHERE ct.`email` = \'' . pSQL($email) . '\' AND ct.`id_shop` = ' . $idShop . ' AND cm.`id_employee` = 0
                    AND cm.`date_add` > \'' . pSQL(date('Y-m-d H:i:s', time() - 86400)) . '\''
             );
             if ($daily >= self::MAX_PER_EMAIL_DAY) {

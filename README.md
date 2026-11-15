@@ -192,7 +192,7 @@ Response: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "typ
 `FEAT_CONTACT_TURNSTILE` (off by default) protects the PrestaShop `contactform` module:
 
 - The widget (`data-action="contact_form"`) renders through `displayGDPRConsent`, only inside the contact form. The theme template must keep `{hook h='displayGDPRConsent' id_module=$id_module}`.
-- `actionFrontControllerInitAfter` validates `cf-turnstile-response` with Siteverify before contactform runs. It checks `success === true`, the action, and the hostname against "Allowed hostnames" (empty = `PS_SHOP_DOMAIN`/`PS_SHOP_DOMAIN_SSL`). If Siteverify cannot be reached, the message is rejected (fail closed).
-- Limits: 3 messages per IP per 10 min, 5 per email per day.
+- `actionFrontControllerInitAfter` validates `cf-turnstile-response` with Siteverify before contactform runs. It checks `success === true`, the action, and the hostname against "Allowed hostnames" (empty = the shop's `domain`/`domain_ssl`). If Siteverify cannot be reached, the message is rejected (fail closed).
+- Limits: 3 messages per IP per 10 min, 5 per email per day, counted per shop.
 - A rejected POST is neither stored nor mailed. The visitor gets a localized error, and the form keeps the typed values.
 - Site key, secret (write-only) and hostnames are stored per shop, so each shop or client uses its own widget. Turning the switch off disables the whole layer, e.g. while testing.
