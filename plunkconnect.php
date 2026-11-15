@@ -19,6 +19,7 @@ use PlunkConnect\Config;
 use PlunkConnect\Mapper\LocaleMapper;
 use PlunkConnect\Outbox\Outbox;
 use PlunkConnect\Outbox\OutboxProcessor;
+use PlunkConnect\Service\ContactGuardService;
 use PlunkConnect\Service\FormsService;
 use PlunkConnect\Service\GdprService;
 use PlunkConnect\Service\SubscriptionService;
@@ -38,6 +39,8 @@ class Plunkconnect extends Module
         'actionOrderStatusPostUpdate',
         'actionFrontControllerSetMedia',
         'displayHeader',
+        'actionFrontControllerInitAfter',
+        'displayGDPRConsent',
         'actionUpdateQuantity',
         'actionObjectStockAvailableUpdateAfter',
         'actionProductAdd',
@@ -63,7 +66,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.4.1';
+        $this->version = '1.5.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -137,6 +140,7 @@ class Plunkconnect extends Module
         Config::set(Config::FEAT_DOUBLE_OPTIN, 1);
         Config::set(Config::FEAT_CATALOG_SYNC, 0);
         Config::set(Config::FEAT_FORMS, 0);
+        Config::set(Config::FEAT_CONTACT_TURNSTILE, 0);
         Config::set(Config::CONSENT_SOURCE, 'website_signup');
         Config::set(Config::DB_VERSION, $this->version);
 
@@ -295,6 +299,29 @@ class Plunkconnect extends Module
         $cart = $params['object'] ?? null;
         if ($cart instanceof Cart) {
             TrackingService::cartUpdated($cart);
+        }
+    }
+
+    public function hookActionFrontControllerInitAfter(array $params): void
+    {
+        $controller = $params['controller'] ?? null;
+        if (!$controller instanceof FrontController) {
+            return;
+        }
+        try {
+            ContactGuardService::guard($controller);
+        } catch (Throwable $e) {
+            // Never break the contact page; contactform's own checks still apply.
+            self::logHookError('actionFrontControllerInitAfter', $e);
+        }
+    }
+
+    public function hookDisplayGDPRConsent(array $params): string
+    {
+        try {
+            return ContactGuardService::widgetHtml((int) ($params['id_module'] ?? 0));
+        } catch (Throwable $e) {
+            return '';
         }
     }
 
@@ -597,7 +624,9 @@ class Plunkconnect extends Module
             Config::CONSENT_COOKIE, Config::CONSENT_COOKIE_VALUE] as $key) {
             Config::set($key, trim((string) Tools::getValue($key)));
         }
-        foreach ([Config::PUBLIC_KEY, Config::SECRET_KEY] as $key) {
+        Config::set(Config::TURNSTILE_SITE_KEY, trim((string) Tools::getValue(Config::TURNSTILE_SITE_KEY)));
+        Config::set(Config::TURNSTILE_HOSTNAMES, implode(',', ContactGuardService::parseHostnames((string) Tools::getValue(Config::TURNSTILE_HOSTNAMES))));
+        foreach ([Config::PUBLIC_KEY, Config::SECRET_KEY, Config::TURNSTILE_SECRET] as $key) {
             $value = trim((string) Tools::getValue($key));
             if ('' !== $value) {
                 Config::set($key, $value);
@@ -606,7 +635,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS, Config::FEAT_CONTACT_TURNSTILE] as $key) {
             Config::set($key, (int) (bool) Tools::getValue($key));
         }
 
@@ -755,6 +784,18 @@ class Plunkconnect extends Module
                 'submit' => ['title' => $this->l('Save')],
             ]],
             ['form' => [
+                'legend' => ['title' => $this->l('Contact form protection (Cloudflare Turnstile)'), 'icon' => 'icon-shield'],
+                'input' => [
+                    ['type' => 'text', 'label' => $this->l('Turnstile site key'), 'name' => Config::TURNSTILE_SITE_KEY,
+                        'desc' => $this->l('Widget for this shop\'s domains, action contact_form.')],
+                    ['type' => 'password', 'label' => $this->l('Turnstile secret key'), 'name' => Config::TURNSTILE_SECRET,
+                        'desc' => $this->l('Leave empty to keep current value.')],
+                    ['type' => 'text', 'label' => $this->l('Allowed hostnames'), 'name' => Config::TURNSTILE_HOSTNAMES,
+                        'desc' => $this->l('Comma-separated, e.g. example.com,www.example.com. Empty = shop domains.')],
+                ],
+                'submit' => ['title' => $this->l('Save')],
+            ]],
+            ['form' => [
                 'legend' => ['title' => $this->l('Coupon rules'), 'icon' => 'icon-tags'],
                 'input' => [
                     ['type' => 'textarea', 'label' => $this->l('Rules (JSON)'), 'name' => Config::COUPON_RULES,
@@ -845,6 +886,7 @@ class Plunkconnect extends Module
             [Config::FEAT_PK_CAPTURE, 'Identify visitors from Plunk email clicks (?pk_e=)'],
             [Config::FEAT_CATALOG_SYNC, 'Catalog sync to Plunk (products -> /catalog/products)'],
             [Config::FEAT_FORMS, 'Plunk signup forms (embed script; forms are managed in Plunk)'],
+            [Config::FEAT_CONTACT_TURNSTILE, 'Contact form protection (Turnstile + rate limit; needs keys below)'],
         ];
 
         $inputs = [];
@@ -870,6 +912,9 @@ class Plunkconnect extends Module
             Config::API_URL => Config::get(Config::API_URL),
             Config::PUBLIC_KEY => '',
             Config::SECRET_KEY => '',
+            Config::TURNSTILE_SITE_KEY => Config::get(Config::TURNSTILE_SITE_KEY),
+            Config::TURNSTILE_SECRET => '',
+            Config::TURNSTILE_HOSTNAMES => Config::get(Config::TURNSTILE_HOSTNAMES),
             Config::CONSENT_SOURCE => Config::get(Config::CONSENT_SOURCE),
             Config::SHOP_CODE => Config::get(Config::SHOP_CODE),
             Config::CONSENT_COOKIE => Config::get(Config::CONSENT_COOKIE),
@@ -884,7 +929,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS, Config::FEAT_CONTACT_TURNSTILE] as $key) {
             $values[$key] = (int) Config::getBool($key);
         }
         foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {
