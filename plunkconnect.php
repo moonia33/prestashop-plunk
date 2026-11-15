@@ -19,6 +19,7 @@ use PlunkConnect\Config;
 use PlunkConnect\Mapper\LocaleMapper;
 use PlunkConnect\Outbox\Outbox;
 use PlunkConnect\Outbox\OutboxProcessor;
+use PlunkConnect\Service\FormsService;
 use PlunkConnect\Service\GdprService;
 use PlunkConnect\Service\SubscriptionService;
 use PlunkConnect\Service\TrackingService;
@@ -36,6 +37,7 @@ class Plunkconnect extends Module
         'actionValidateOrder',
         'actionOrderStatusPostUpdate',
         'actionFrontControllerSetMedia',
+        'displayHeader',
         'actionUpdateQuantity',
         'actionObjectStockAvailableUpdateAfter',
         'actionProductAdd',
@@ -61,7 +63,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.3.0';
+        $this->version = '1.4.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -134,6 +136,7 @@ class Plunkconnect extends Module
         Config::set(Config::FEAT_SUBSCRIPTIONS, 1);
         Config::set(Config::FEAT_DOUBLE_OPTIN, 1);
         Config::set(Config::FEAT_CATALOG_SYNC, 0);
+        Config::set(Config::FEAT_FORMS, 0);
         Config::set(Config::CONSENT_SOURCE, 'website_signup');
         Config::set(Config::DB_VERSION, $this->version);
 
@@ -266,6 +269,16 @@ class Plunkconnect extends Module
             TrackingService::onFrontControllerSetMedia();
         } catch (Throwable $e) {
             // Tracking must never break a page.
+        }
+    }
+
+    public function hookDisplayHeader(array $params): string
+    {
+        try {
+            return FormsService::headerHtml();
+        } catch (Throwable $e) {
+            // Forms must never break a page.
+            return '';
         }
     }
 
@@ -578,7 +591,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS] as $key) {
             Config::set($key, (int) (bool) Tools::getValue($key));
         }
 
@@ -816,6 +829,7 @@ class Plunkconnect extends Module
             [Config::FEAT_BACKINSTOCK, 'Back-in-stock events (ps_emailalerts)'],
             [Config::FEAT_PK_CAPTURE, 'Identify visitors from Plunk email clicks (?pk_e=)'],
             [Config::FEAT_CATALOG_SYNC, 'Catalog sync to Plunk (products -> /catalog/products)'],
+            [Config::FEAT_FORMS, 'Plunk signup forms (embed script; forms are managed in Plunk)'],
         ];
 
         $inputs = [];
@@ -855,7 +869,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS] as $key) {
             $values[$key] = (int) Config::getBool($key);
         }
         foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {

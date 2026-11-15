@@ -91,6 +91,18 @@ Masyvai (`product`, `cart`, `order`) siunčiami kaip `{value:…, persistent:fal
 - Admin „Full sync now" tik užsarašo outbox eilę – nieko nesiunčia sinchroniškai.
 - Autentifikacija – `Authorization: Bearer <sk_>`; 4xx (išskyrus 408/429) → dead, 408/429/5xx → retry.
 
+### Formos (Plunk)
+
+- Formos (popup, slide-in, juosta, įterpta, landing), jų tekstai, rodymo taisyklės, pomėgiai ir DOI kuriami Plunk dashboard'e (Forms). Modulyje nieko nesaugoma.
+- `FEAT_FORMS` (admin, išjungta pagal nutylėjimą) per `displayHeader` įdeda `window.PlunkForms` ir `<API_URL>/forms/embed.js` (async):
+  - `key` – Plunk viešas raktas (`pk_`);
+  - `locale` – pagal `LocaleMapper` (tas pats žemėlapis kaip įvykiams);
+  - `subscribed` – prisijungusio pirkėjo `newsletter`;
+  - `customer` – prisijungęs pirkėjas turi bent vieną galiojantį užsakymą.
+- Svečiams `subscribed`/`customer` = `false`; po prenumeratos per formą skriptas pats įsimena `plunk_subscribed` (`localStorage`).
+- Įterptos formos rodomos ten, kur temoje ar CMS turinyje yra `<div data-plunk-form="<formos id>"></div>`. Popup atidaryti mygtuku: `window.PlunkForms.open('<formos id>')`.
+- Turnstile (botų apsauga) – Plunk projekto nustatymuose (Forms → Turnstile); hostname'uose turi būti parduotuvės domenai.
+
 ### Pastabos Plunk workflow'ams
 
 - WEBHOOK žingsnis: jei Plunk nemoka skaičiuoti HMAC, naudokite statinę antraštę `Authorization: Bearer <webhook secret>`.

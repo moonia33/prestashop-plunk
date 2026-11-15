@@ -302,6 +302,11 @@ class Customer extends ObjectModel
     {
     }
 
+    public function isLogged(bool $withGuest = false): bool
+    {
+        return false;
+    }
+
     /** @return int|bool */
     public static function customerExists(string $email, bool $returnId = false, bool $ignoreGuest = true)
     {

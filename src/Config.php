@@ -42,6 +42,7 @@ final class Config
     public const FEAT_BACKINSTOCK = self::PREFIX . 'FEAT_BACKINSTOCK';
     public const FEAT_PK_CAPTURE = self::PREFIX . 'FEAT_PK_CAPTURE';
     public const FEAT_CATALOG_SYNC = self::PREFIX . 'FEAT_CATALOG_SYNC';
+    public const FEAT_FORMS = self::PREFIX . 'FEAT_FORMS';
     public const CATALOG_LAST_SYNC = self::PREFIX . 'CATALOG_LAST_SYNC';
     public const CATALOG_FULL_SYNC_AT = self::PREFIX . 'CATALOG_FULL_SYNC_AT';
 
@@ -61,7 +62,7 @@ final class Config
         self::FEAT_SUBSCRIPTIONS, self::FEAT_DOUBLE_OPTIN, self::FEAT_VIEWS,
         self::FEAT_CART, self::FEAT_ORDERS, self::FEAT_FEED, self::FEAT_COUPONS,
         self::FEAT_BACKINSTOCK, self::FEAT_PK_CAPTURE,
-        self::FEAT_CATALOG_SYNC, self::CATALOG_LAST_SYNC, self::CATALOG_FULL_SYNC_AT,
+        self::FEAT_CATALOG_SYNC, self::FEAT_FORMS, self::CATALOG_LAST_SYNC, self::CATALOG_FULL_SYNC_AT,
         self::CONSENT_SOURCE, self::SHOP_CODE,
         self::CONSENT_COOKIE, self::CONSENT_COOKIE_VALUE, self::DB_VERSION,
     ];
