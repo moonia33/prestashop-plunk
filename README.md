@@ -186,3 +186,13 @@ Response: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "typ
 - Idempotent on `email+rule+cartId/executionId`; a live coupon for the same `email+rule` is reused.
 - Rate limit: ≤3 coupons / `email+rule` / 30d → HTTP 429.
 - Tracked in `PREFIX_plunk_coupon`; `order.placed` carries `data.order.couponCode`; unused expired rules are removed by `plunkconnect:coupons:cleanup`.
+
+### Contact form protection (Turnstile)
+
+`FEAT_CONTACT_TURNSTILE` (off by default) protects the PrestaShop `contactform` module:
+
+- The widget (`data-action="contact_form"`) renders through `displayGDPRConsent`, only inside the contact form. The theme template must keep `{hook h='displayGDPRConsent' id_module=$id_module}`.
+- `actionFrontControllerInitAfter` validates `cf-turnstile-response` with Siteverify before contactform runs. It checks `success === true`, the action, and the hostname against "Allowed hostnames" (empty = the shop's `domain`/`domain_ssl`). If Siteverify cannot be reached, the message is rejected (fail closed).
+- Limits: 3 messages per IP per 10 min, 5 per email per day, counted per shop.
+- A rejected POST is neither stored nor mailed. The visitor gets a localized error, and the form keeps the typed values.
+- Site key, secret (write-only) and hostnames are stored per shop, so each shop or client uses its own widget. Turning the switch off disables the whole layer, e.g. while testing.

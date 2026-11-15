@@ -380,6 +380,12 @@ class Context
 
 class Module
 {
+    /** @return int|false */
+    public static function getModuleIdByName(string $name)
+    {
+        return false;
+    }
+
     /** @var string */
     public $name = '';
     /** @var bool */
@@ -465,6 +471,10 @@ class FrontController
 {
     /** @var Context */
     public $context;
+    /** @var string */
+    public $php_self = '';
+    /** @var string[] */
+    public $errors = [];
     /** @var Module */
     public $module;
 
