@@ -98,7 +98,8 @@ class Plunkconnect extends Module
     {
         $src = __DIR__ . '/config/services.yml.dist';
         $dst = __DIR__ . '/config/services.yml';
-        if (file_exists($src) && file_exists(__DIR__ . '/vendor/autoload.php') && !file_exists($dst)) {
+        if (file_exists($src) && file_exists(__DIR__ . '/vendor/autoload.php')
+            && (!file_exists($dst) || md5_file($src) !== md5_file($dst))) {
             copy($src, $dst);
         }
     }

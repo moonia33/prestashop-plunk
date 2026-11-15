@@ -205,7 +205,8 @@ final class TrackingService
         $mapper = new OrderMapper();
         $data = CustomerMapper::base($idLang, $idShop);
         $data += CustomerMapper::contact($customer, $idShop);
-        $data += $mapper->contactAggregates($order, $email, $idShop);
+        $data += $mapper->contactAggregates($email, $idShop);
+        $data['cartItemsCount'] = 0;
         $data['order'] = [
             'value' => $mapper->map($order, $idShop, $idLang, $mapper->isFirstOrder($order)),
             'persistent' => false,
@@ -252,10 +253,10 @@ final class TrackingService
         $idShop = (int) $order->id_shop;
         $idLang = (int) ($customer->id_lang ?: \Context::getContext()->language->id);
 
-        $data = CustomerMapper::base($idLang, $idShop);
-        $data['lastOrderStatus'] = $event;
-
         $mapper = new OrderMapper();
+        $data = CustomerMapper::base($idLang, $idShop);
+        // Totals change on cancel/refund (order no longer valid); status is the latest order's.
+        $data += $mapper->contactAggregates($email, $idShop);
         $orderData = $mapper->map($order, $idShop, $idLang);
         $trackingUrl = self::trackingUrl($order);
         if ($trackingUrl) {

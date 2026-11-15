@@ -12,6 +12,8 @@ if (!defined('_PS_VERSION_')) {
 
 function upgrade_module_1_3_0(Plunkconnect $module): bool
 {
+    $module->enableServicesYaml();
+
     $ok = Db::getInstance()->execute(
         'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_catalog_id` (
             `id_shop` INT UNSIGNED NOT NULL,
