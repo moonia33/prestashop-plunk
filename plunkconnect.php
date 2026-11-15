@@ -869,7 +869,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS] as $key) {
             $values[$key] = (int) Config::getBool($key);
         }
         foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {
