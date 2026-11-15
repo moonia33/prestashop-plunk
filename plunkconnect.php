@@ -61,7 +61,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.2.0';
+        $this->version = '1.3.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -360,7 +360,10 @@ class Plunkconnect extends Module
         $idProduct = (int) ($combo->id_product ?? 0);
         $idAttr = (int) ($combo->id ?? 0);
         if ($idProduct > 0 && $idAttr > 0) {
-            Outbox::enqueue('catalog.delete', ['ids' => [PlunkConnect\Mapper\CatalogMapper::plunkId($idProduct, $idAttr)]], 'catalog.delete:' . $idProduct);
+            $idShop = (int) Context::getContext()->shop->id;
+            $plunkId = PlunkConnect\Catalog\CatalogIds::forUnit($idProduct, $idAttr, $idShop);
+            Outbox::enqueue('catalog.delete', ['ids' => [$plunkId], 'product' => $idProduct], 'catalog.delete:' . $plunkId);
+            PlunkConnect\Catalog\CatalogIds::forget($idShop, $idProduct, $idAttr);
         }
     }
 
@@ -371,7 +374,10 @@ class Plunkconnect extends Module
         $idProduct = (int) ($product->id ?? 0);
         if ($idProduct > 0) {
             $idShop = (int) Context::getContext()->shop->id;
-            $this->deletingProductIds[$idProduct] = (new PlunkConnect\Mapper\CatalogMapper())->plunkIds($idProduct, $idShop);
+            $this->deletingProductIds[$idProduct] = array_values(array_unique(array_merge(
+                PlunkConnect\Catalog\CatalogIds::storedForProduct($idProduct, $idShop),
+                array_values(PlunkConnect\Catalog\CatalogIds::forProducts([$idProduct], $idShop)[$idProduct] ?? [])
+            )));
         }
     }
 
@@ -381,13 +387,18 @@ class Plunkconnect extends Module
             return;
         }
         $idProduct = (int) ($params['product']->id ?? $params['id_product'] ?? 0);
+        $idShop = (int) Context::getContext()->shop->id;
         $ids = $this->deletingProductIds[$idProduct] ?? null;
         if (null === $ids) {
-            // Fallback: parent only (combination rows may already be gone).
-            $ids = $idProduct > 0 ? [(string) $idProduct] : [];
+            // Product rows are gone: whatever was sent to Plunk, plus the parent fallback.
+            $ids = $idProduct > 0 ? array_values(array_unique(array_merge(
+                PlunkConnect\Catalog\CatalogIds::storedForProduct($idProduct, $idShop),
+                [PlunkConnect\Catalog\CatalogIds::fallback($idProduct)]
+            ))) : [];
         }
         if ($ids) {
-            Outbox::enqueue('catalog.delete', ['ids' => $ids], 'catalog.delete:' . $idProduct);
+            Outbox::enqueue('catalog.delete', ['ids' => $ids, 'product' => $idProduct], 'catalog.delete:p' . $idProduct);
+            PlunkConnect\Catalog\CatalogIds::forget($idShop, $idProduct);
         }
     }
 
@@ -434,10 +445,11 @@ class Plunkconnect extends Module
             return;
         }
         $idShop = (int) Context::getContext()->shop->id;
-        foreach ((new PlunkConnect\Mapper\CatalogMapper())->plunkIds($idProduct, $idShop) as $plunkId) {
-            if ($idAttr > 0 && $plunkId !== PlunkConnect\Mapper\CatalogMapper::plunkId($idProduct, $idAttr)) {
-                continue; // quantity hooks name the exact combination
-            }
+        $units = PlunkConnect\Catalog\CatalogIds::forProducts([$idProduct], $idShop)[$idProduct] ?? [];
+        if ($idAttr > 0) {
+            $units = array_intersect_key($units, [$idAttr => true]); // quantity hooks name the exact combination
+        }
+        foreach ($units as $plunkId) {
             Outbox::enqueue('catalog.patch', ['id' => $plunkId], 'catalog.patch:' . $plunkId, 60);
         }
     }

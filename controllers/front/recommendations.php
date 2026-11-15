@@ -1,12 +1,14 @@
 <?php
 
 /**
- * GET /module/plunkconnect/recommendations?product_ids=1,2&lang=lt&limit=6
+ * GET /module/plunkconnect/recommendations?product_ids=SKU1,PS-2&lang=lt&limit=6
+ * product_ids: Plunk catalog ids (SKU or PS-<id>[-<attr>]) or id_product.
  * Accessories of the given products first, then best sellers of the same
  * categories; in-stock only; products already passed in are excluded.
  */
 require_once dirname(__DIR__, 2) . '/autoload.php';
 
+use PlunkConnect\Catalog\CatalogIds;
 use PlunkConnect\Config;
 use PlunkConnect\Mapper\ProductMapper;
 use PlunkConnect\Service\RequestAuth;
@@ -21,9 +23,10 @@ class PlunkconnectRecommendationsModuleFrontController extends ModuleFrontContro
             $this->respond(401, ['error' => 'unauthorized']);
         }
 
-        $inputIds = array_filter(array_map('intval', explode(',', (string) Tools::getValue('product_ids'))));
         $limit = max(1, min((int) Tools::getValue('limit', 6), self::MAX));
         $idShop = (int) Context::getContext()->shop->id;
+        $raw = array_slice(array_filter(array_map('trim', explode(',', (string) Tools::getValue('product_ids'))), fn ($v) => '' !== $v), 0, 50);
+        $inputIds = array_values(array_unique(array_map(fn ($unit) => $unit[0], CatalogIds::resolve($raw, $idShop))));
         $iso = strtolower((string) Tools::getValue('lang'));
         $idLang = '' !== $iso && ($id = (int) Language::getIdByIso($iso)) > 0
             ? $id

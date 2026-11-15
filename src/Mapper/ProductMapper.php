@@ -9,6 +9,8 @@
 
 namespace PlunkConnect\Mapper;
 
+use PlunkConnect\Catalog\CatalogIds;
+
 final class ProductMapper
 {
     private const FEED_MAX_LIMIT = 500;
@@ -50,11 +52,12 @@ final class ProductMapper
              LIMIT ' . $limit
         ) ?: [];
 
+        $catalogIds = CatalogIds::forProducts(array_column($rows, 'id_product'), $idShop);
         $items = [];
         $lastId = $cursor;
         foreach ($rows as $row) {
             $lastId = (int) $row['id_product'];
-            $items[] = $this->mapRow($row, $idShop, $idLang);
+            $items[] = $this->mapRow($row, $idShop, $idLang, $catalogIds[$lastId][0] ?? null);
         }
 
         return [
@@ -102,13 +105,15 @@ final class ProductMapper
         foreach ($rows as $row) {
             $byId[(int) $row['id_product']] = $row;
         }
+        $catalogIds = CatalogIds::forProducts($ids, $idShop);
 
         $out = [];
         foreach ($ids as $id) {
+            $productId = $catalogIds[$id][0] ?? CatalogIds::fallback($id);
             if (isset($byId[$id]) && 1 === (int) $byId[$id]['active']) {
-                $out[] = $this->mapRow($byId[$id], $idShop, $idLang);
+                $out[] = $this->mapRow($byId[$id], $idShop, $idLang, $productId);
             } else {
-                $out[] = ['id' => $id, 'productId' => (string) $id, 'available' => false];
+                $out[] = ['id' => $id, 'productId' => $productId, 'available' => false];
             }
         }
 
@@ -128,8 +133,10 @@ final class ProductMapper
         if ($idProductAttribute > 0) {
             $product['combinationId'] = $idProductAttribute;
         }
-        // Plunk-wide id format: "<id_product>" or "<id_product>-<attr>".
-        $product['productId'] = $idProduct . ($idProductAttribute > 0 ? '-' . $idProductAttribute : '');
+        // Same id as the Plunk catalog row (see CatalogIds).
+        if ($idProductAttribute > 0) {
+            $product['productId'] = CatalogIds::forUnit($idProduct, $idProductAttribute, $idShop);
+        }
 
         return $product;
     }
@@ -155,7 +162,7 @@ final class ProductMapper
         return $product;
     }
 
-    private function mapRow(array $row, int $idShop, int $idLang): array
+    private function mapRow(array $row, int $idShop, int $idLang, ?string $productId = null): array
     {
         $idProduct = (int) $row['id_product'];
         $precision = \Context::getContext()->getComputingPrecision();
@@ -180,7 +187,7 @@ final class ProductMapper
 
         return [
             'id' => $idProduct,
-            'productId' => (string) $idProduct,
+            'productId' => $productId ?? CatalogIds::forUnit($idProduct, 0, $idShop),
             'combinationId' => 0,
             'sku' => (string) ($row['reference'] ?? ''),
             'ean' => (string) ($row['ean13'] ?? ''),

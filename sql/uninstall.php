@@ -7,6 +7,7 @@ $sql = [];
 
 $sql[] = 'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'plunk_outbox`';
 $sql[] = 'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'plunk_coupon`';
+$sql[] = 'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'plunk_catalog_id`';
 
 foreach ($sql as $query) {
     if (!Db::getInstance()->execute($query)) {

@@ -2,6 +2,16 @@
 
 All notable changes to `plunkconnect` are documented here.
 
+## [1.3.0] - 2026-11-14
+
+### Changed
+- Catalog ids (Plunk `externalId`, event `productId`/`recentlyViewed`, recommendations, `/products`) are now the SKU: the sellable unit's `reference` when filled and unique across all sellable units (case/space-insensitive), otherwise `PS-<id_product>[-<id_product_attribute>]`. Parents of combinations always use `PS-<id_product>`. The same SKU-based id lets a shop move to another platform without remapping Plunk data.
+- `/products` and `/recommendations` accept catalog ids (old numeric ids still resolve).
+
+### Added
+- `ps_plunk_catalog_id` stores the id last sent per unit; when a reference is fixed the next upsert deletes the old Plunk row (`catalog.delete`) and creates the new one.
+- `upgrade-1.3.0`: creates the table. Delete old-format ids from Plunk and run `plunkconnect:catalog:sync --full` after upgrading.
+
 ## [1.2.0] - 2026-11-15
 
 ### Fixed (production, baltijoszvynas.lt)

@@ -31,10 +31,11 @@ final class Outbox
      *                               adding a new one (cart spam collapse)
      * @param int $delaySeconds schedule first/next attempt N seconds from now
      *                          (catalog.patch merges bursts over ~60 s)
+     * @param int|null $idShop target shop; defaults to the context shop
      */
-    public static function enqueue(string $endpoint, array $payload, ?string $dedupeKey = null, int $delaySeconds = 0): bool
+    public static function enqueue(string $endpoint, array $payload, ?string $dedupeKey = null, int $delaySeconds = 0, ?int $idShop = null): bool
     {
-        $idShop = (int) (\Context::getContext()->shop->id ?? 0);
+        $idShop = $idShop ?? (int) (\Context::getContext()->shop->id ?? 0);
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (false === $json) {
             return false;
