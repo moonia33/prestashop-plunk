@@ -108,9 +108,21 @@ final class IdentityService
         $list = array_values(array_filter($list, fn ($id) => $id !== $plunkId));
         $list[] = $plunkId;
         $context->cookie->{self::ANON_COOKIE} = json_encode(array_slice($list, -self::ANON_MAX));
-        if (!self::nonceFresh(self::identifyNonce(), time())) {
-            $context->cookie->{self::IDENTIFY_NONCE} = time() . '.' . bin2hex(random_bytes(16));
+        self::ensureIdentifyNonce();
+    }
+
+    /**
+     * Current nonce, re-issued when missing or expired (returning visitor).
+     */
+    public static function ensureIdentifyNonce(): string
+    {
+        $nonce = self::identifyNonce();
+        if (!self::nonceFresh($nonce, time())) {
+            $nonce = time() . '.' . bin2hex(random_bytes(16));
+            \Context::getContext()->cookie->{self::IDENTIFY_NONCE} = $nonce;
         }
+
+        return $nonce;
     }
 
     /**
