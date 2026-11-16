@@ -54,6 +54,7 @@ final class FormsService
             || null !== IdentityService::email($context) || !IdentityService::anonymousViews()) {
             return null;
         }
+
         return ['url' => $context->link->getModuleLink('plunkconnect', 'identify'), 'token' => IdentityService::ensureIdentifyNonce()];
     }
 
