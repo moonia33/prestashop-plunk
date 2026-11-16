@@ -4,13 +4,16 @@
  * POST /module/plunkconnect/identify (email, token)
  * Called by the page after a Plunk form signup: flushes the visitor's
  * buffered anonymous product views to that email as one `product.viewed`.
- * The email is what the visitor typed (unverified), so the call is
- * single-use per session (the nonce is cleared with the buffer) and never
- * identifies the browser for later tracking.
+ * The email is what the visitor typed (unverified), so the call never
+ * identifies the browser for later tracking and each nonce works once:
+ * it is cleared with the buffer, expires after 48 h and, because the PS
+ * cookie can be replayed, is also recorded server-side as the outbox
+ * dedupe key.
  */
 require_once dirname(__DIR__, 2) . '/autoload.php';
 
 use PlunkConnect\Config;
+use PlunkConnect\Outbox\Outbox;
 use PlunkConnect\Service\ConsentService;
 use PlunkConnect\Service\IdentityService;
 use PlunkConnect\Service\TrackingService;
@@ -35,8 +38,12 @@ class PlunkconnectIdentifyModuleFrontController extends ModuleFrontController
         }
 
         $context = Context::getContext();
+        $dedupeKey = 'identify:' . hash('sha256', (string) Tools::getValue('token'));
+        if (Outbox::exists($dedupeKey, (int) $context->shop->id)) {
+            $this->respond(403);
+        }
         if (null === IdentityService::email($context)) {
-            TrackingService::flushAnonymousViews($email, (int) $context->language->id);
+            TrackingService::flushAnonymousViews($email, (int) $context->language->id, $dedupeKey);
         }
         IdentityService::drainAnonymousViews();
         $context->cookie->write();

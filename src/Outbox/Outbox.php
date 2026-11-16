@@ -91,6 +91,17 @@ final class Outbox
     }
 
     /**
+     * Any row (any status) with this dedupe key; sent rows are kept 7 days.
+     */
+    public static function exists(string $dedupeKey, int $idShop): bool
+    {
+        return (bool) \Db::getInstance()->getValue(
+            'SELECT 1 FROM `' . _DB_PREFIX_ . self::TABLE . '`
+             WHERE `dedupe_key` = \'' . pSQL($dedupeKey) . '\' AND `id_shop` = ' . $idShop
+        );
+    }
+
+    /**
      * Counts by status for the admin status panel.
      */
     public static function counts(): array

@@ -20,6 +20,7 @@ final class IdentityService
     private const ANON_COOKIE = 'plunk_views';
     private const ANON_MAX = 20;
     private const IDENTIFY_NONCE = 'plunk_nonce';
+    private const IDENTIFY_TTL = 172800;
 
     /**
      * Email address for the current visitor, or null when anonymous.
@@ -107,8 +108,8 @@ final class IdentityService
         $list = array_values(array_filter($list, fn ($id) => $id !== $plunkId));
         $list[] = $plunkId;
         $context->cookie->{self::ANON_COOKIE} = json_encode(array_slice($list, -self::ANON_MAX));
-        if ('' === self::identifyNonce()) {
-            $context->cookie->{self::IDENTIFY_NONCE} = bin2hex(random_bytes(16));
+        if (!self::nonceFresh(self::identifyNonce(), time())) {
+            $context->cookie->{self::IDENTIFY_NONCE} = time() . '.' . bin2hex(random_bytes(16));
         }
     }
 
@@ -127,7 +128,21 @@ final class IdentityService
     {
         $nonce = self::identifyNonce();
 
-        return '' !== $nonce && '' !== $token && hash_equals($nonce, $token);
+        return '' !== $token && self::nonceFresh($nonce, time()) && hash_equals($nonce, $token);
+    }
+
+    /**
+     * Nonces are "<issued unix time>.<random>" and expire after 48 h, well
+     * inside the 7-day outbox retention that backs single use.
+     */
+    public static function nonceFresh(string $nonce, int $now): bool
+    {
+        if (!preg_match('/^(\d{10})\.[0-9a-f]{32}$/D', $nonce, $m)) {
+            return false;
+        }
+        $age = $now - (int) $m[1];
+
+        return $age >= 0 && $age <= self::IDENTIFY_TTL;
     }
 
     /**

@@ -296,7 +296,7 @@ final class TrackingService
     /**
      * One `product.viewed` event carrying the anonymous view history.
      */
-    public static function flushAnonymousViews(string $email, int $idLang): void
+    public static function flushAnonymousViews(string $email, int $idLang, ?string $dedupeKey = null): void
     {
         $views = IdentityService::drainAnonymousViews();
         if (!$views) {
@@ -328,7 +328,7 @@ final class TrackingService
             'event' => 'product.viewed',
             'email' => $email,
             'data' => $data,
-        ]);
+        ], $dedupeKey);
     }
 
     /**
