@@ -19,6 +19,8 @@ final class IdentityService
     public const COOKIE_DAYS = 365;
     private const ANON_COOKIE = 'plunk_views';
     private const ANON_MAX = 20;
+    private const IDENTIFY_NONCE = 'plunk_nonce';
+    private const IDENTIFY_TTL = 172800;
 
     /**
      * Email address for the current visitor, or null when anonymous.
@@ -106,6 +108,53 @@ final class IdentityService
         $list = array_values(array_filter($list, fn ($id) => $id !== $plunkId));
         $list[] = $plunkId;
         $context->cookie->{self::ANON_COOKIE} = json_encode(array_slice($list, -self::ANON_MAX));
+        self::ensureIdentifyNonce();
+    }
+
+    /**
+     * Current nonce, re-issued when missing or expired (returning visitor).
+     */
+    public static function ensureIdentifyNonce(): string
+    {
+        $nonce = self::identifyNonce();
+        if (!self::nonceFresh($nonce, time())) {
+            $nonce = time() . '.' . bin2hex(random_bytes(16));
+            \Context::getContext()->cookie->{self::IDENTIFY_NONCE} = $nonce;
+        }
+
+        return $nonce;
+    }
+
+    /**
+     * Session nonce for the form-signup identify call; empty until the
+     * visitor has buffered views.
+     */
+    public static function identifyNonce(): string
+    {
+        $context = \Context::getContext();
+
+        return isset($context->cookie->{self::IDENTIFY_NONCE}) ? (string) $context->cookie->{self::IDENTIFY_NONCE} : '';
+    }
+
+    public static function verifyIdentifyNonce(string $token): bool
+    {
+        $nonce = self::identifyNonce();
+
+        return '' !== $token && self::nonceFresh($nonce, time()) && hash_equals($nonce, $token);
+    }
+
+    /**
+     * Nonces are "<issued unix time>.<random>" and expire after 48 h, well
+     * inside the 7-day outbox retention that backs single use.
+     */
+    public static function nonceFresh(string $nonce, int $now): bool
+    {
+        if (!preg_match('/^(\d{10})\.[0-9a-f]{32}$/D', $nonce, $m)) {
+            return false;
+        }
+        $age = $now - (int) $m[1];
+
+        return $age >= 0 && $age <= self::IDENTIFY_TTL;
     }
 
     /**
@@ -116,6 +165,7 @@ final class IdentityService
         $context = \Context::getContext();
         $views = self::anonymousViews();
         $context->cookie->{self::ANON_COOKIE} = '';
+        $context->cookie->{self::IDENTIFY_NONCE} = '';
 
         return $views;
     }

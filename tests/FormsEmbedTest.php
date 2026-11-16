@@ -41,4 +41,29 @@ class FormsEmbedTest extends TestCase
         $this->assertStringNotContainsString('"onload="', $html);
         $this->assertStringContainsString('&quot;onload=&quot;', $html);
     }
+
+    public function testIdentifyListenerRendersBeforeEmbedScript(): void
+    {
+        $html = FormsService::render('https://api.example.com', self::CONFIG, ['url' => 'https://shop.example.com/module/plunkconnect/identify', 'token' => 'abc123']);
+
+        $this->assertStringContainsString('plunk:form-submitted', $html);
+        $this->assertStringContainsString('"token":"abc123"', $html);
+        $this->assertLessThan(strpos($html, 'embed.js'), strpos($html, 'plunk:form-submitted'));
+        $this->assertSame(3, substr_count($html, '</script>'));
+    }
+
+    public function testIdentifyListenerSkippedWithoutConfigOrForNonHttpUrl(): void
+    {
+        $this->assertStringNotContainsString('plunk:form-submitted', FormsService::render('https://api.example.com', self::CONFIG));
+        $html = FormsService::render('https://api.example.com', self::CONFIG, ['url' => 'javascript:alert(1)', 'token' => 'x']);
+        $this->assertStringNotContainsString('plunk:form-submitted', $html);
+    }
+
+    public function testIdentifyTokenCannotBreakOutOfTheScriptTag(): void
+    {
+        $html = FormsService::render('https://api.example.com', self::CONFIG, ['url' => 'https://shop.example.com/i', 'token' => '</script><script>alert(1)</script>']);
+
+        $this->assertSame(3, substr_count($html, '</script>'));
+        $this->assertStringNotContainsString('<script>alert', $html);
+    }
 }

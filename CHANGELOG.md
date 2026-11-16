@@ -2,6 +2,12 @@
 
 All notable changes to `plunkconnect` are documented here.
 
+## [1.6.0] - 2026-11-16
+
+### Added
+- Anonymous product views (the last 20, buffered in the PS cookie) are now also flushed after a signup through a Plunk form, not only after PS login, registration or newsletter signup. The Plunk embed dispatches `plunk:form-submitted`; for an anonymous visitor with buffered views `displayHeader` adds a listener that posts the email to the new `identify` front controller. It requires consent, `FEAT_VIEWS` and a session nonce that expires after 48 h and works once (cleared from the cookie and recorded as the outbox `dedupe_key`, so a replayed cookie is rejected). It sends one `product.viewed` with `recentlyViewed`. The typed email is not verified, so the browser is not identified for later tracking.
+- `upgrade-1.6.0`: version bump only.
+
 ## [1.5.0] - 2026-11-15
 
 ### Added

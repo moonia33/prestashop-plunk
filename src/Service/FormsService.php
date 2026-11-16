@@ -39,13 +39,30 @@ final class FormsService
             'locale' => LocaleMapper::forLang($idLang),
             'subscribed' => $loggedIn && (bool) $customer->newsletter,
             'customer' => $loggedIn && self::hasValidOrder((int) $customer->id),
-        ]);
+        ], self::identifyConfig($context));
+    }
+
+    /**
+     * Anonymous visitor with buffered views: after a form signup the page
+     * posts the email to `identify`, which flushes the views to that contact.
+     *
+     * @return array{url: string, token: string}|null
+     */
+    private static function identifyConfig(\Context $context): ?array
+    {
+        if (!Config::getBool(Config::FEAT_VIEWS) || !ConsentService::marketingAllowed()
+            || null !== IdentityService::email($context) || !IdentityService::anonymousViews()) {
+            return null;
+        }
+
+        return ['url' => $context->link->getModuleLink('plunkconnect', 'identify'), 'token' => IdentityService::ensureIdentifyNonce()];
     }
 
     /**
      * @param array{key: string, locale: string, subscribed: bool, customer: bool} $config
+     * @param array{url: string, token: string}|null $identify
      */
-    public static function render(string $apiUrl, array $config): string
+    public static function render(string $apiUrl, array $config, ?array $identify = null): string
     {
         $src = rtrim($apiUrl, '/') . '/forms/embed.js';
         if (!preg_match('#^https?://#i', $src)) {
@@ -57,7 +74,27 @@ final class FormsService
         }
 
         return '<script>window.PlunkForms=' . $json . ';</script>'
+            . self::identifyScript($identify)
             . '<script src="' . htmlspecialchars($src, ENT_QUOTES, 'UTF-8') . '" async></script>';
+    }
+
+    /**
+     * @param array{url: string, token: string}|null $identify
+     */
+    private static function identifyScript(?array $identify): string
+    {
+        if (null === $identify || !preg_match('#^https?://#i', $identify['url'])) {
+            return '';
+        }
+        $json = json_encode($identify, self::JSON_FLAGS);
+        if (false === $json) {
+            return '';
+        }
+
+        return '<script>(function(c){document.addEventListener("plunk:form-submitted",function(e){'
+            . 'var d=e.detail||{};if(!d.email)return;var b=new FormData();b.append("email",d.email);b.append("token",c.token);'
+            . 'fetch(c.url,{method:"POST",body:b,credentials:"same-origin",keepalive:true}).catch(function(){});'
+            . '},{once:true});})(' . $json . ');</script>';
     }
 
     private static function hasValidOrder(int $idCustomer): bool

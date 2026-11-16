@@ -558,6 +558,7 @@ class Currency extends ObjectModel
 /**
  * @property mixed $id_cart
  * @property mixed $plunk_views
+ * @property mixed $plunk_nonce
  * @property mixed $plunk_vd
  * @property mixed $plunk_rv
  */

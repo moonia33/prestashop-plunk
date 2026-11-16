@@ -58,6 +58,7 @@ bei pilną 03:00–05:00, ne dažniau 1×/20 h).
 | GET | `/module/plunkconnect/recommendations?product_ids=…&lang=lt&limit=6` | `Bearer <feed token>` | priedai + kategorijos best selleriai, tik turimos |
 | POST | `/module/plunkconnect/coupon` | `Bearer <coupon secret>` | vienkartinis `CartRule` iš modulio taisyklės → `{code, validUntil, value, type, minAmount}`; žr. skyrių žemiau |
 | GET | `/module/plunkconnect/restorecart?c=&e=&t=` | HMAC nuoroda (30 d.) | atkuria svečio krepšelį; registruoto – per prisijungimą |
+| POST | `/module/plunkconnect/identify` (`email`, `token`) | sesijos nonce | po Plunk formos prenumeratos sukauptas anonimines peržiūras išsiunčia kaip vieną `product.viewed`; vienkartinis, naršyklės neatpažįsta |
 
 ### Įvykiai (visi per outbox → `POST /v1/track`)
 
@@ -65,6 +66,8 @@ bei pilną 03:00–05:00, ne dažniau 1×/20 h).
 `customer.registered`, `product.viewed` (30 min debounce), `category.viewed`,
 `cart.updated` (sutraukimas per `cart:<id>`), `order.placed`, `order.{paid,shipped,delivered,cancelled,refunded}`,
 `product.back_in_stock`.
+
+Anoniminio lankytojo paskutinės 20 prekių peržiūrų laikomos PS slapuke ir išsiunčiamos kaip vienas `product.viewed` su `recentlyViewed`, kai jis prisijungia, užsiregistruoja, užsiprenumeruoja per PS arba per Plunk formą (`plunk:form-submitted` → `identify`).
 
 Persistent `data` – tik maži skalai (`locale`, `shopCode`, `cartItemsCount`, `ordersCount`, `totalSpent`, …).
 Masyvai (`product`, `cart`, `order`) siunčiami kaip `{value:…, persistent:false}` → prieinami workflow per `{{event.*}}`.
