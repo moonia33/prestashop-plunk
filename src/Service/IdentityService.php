@@ -19,6 +19,7 @@ final class IdentityService
     public const COOKIE_DAYS = 365;
     private const ANON_COOKIE = 'plunk_views';
     private const ANON_MAX = 20;
+    private const IDENTIFY_NONCE = 'plunk_nonce';
 
     /**
      * Email address for the current visitor, or null when anonymous.
@@ -106,6 +107,27 @@ final class IdentityService
         $list = array_values(array_filter($list, fn ($id) => $id !== $plunkId));
         $list[] = $plunkId;
         $context->cookie->{self::ANON_COOKIE} = json_encode(array_slice($list, -self::ANON_MAX));
+        if ('' === self::identifyNonce()) {
+            $context->cookie->{self::IDENTIFY_NONCE} = bin2hex(random_bytes(16));
+        }
+    }
+
+    /**
+     * Session nonce for the form-signup identify call; empty until the
+     * visitor has buffered views.
+     */
+    public static function identifyNonce(): string
+    {
+        $context = \Context::getContext();
+
+        return isset($context->cookie->{self::IDENTIFY_NONCE}) ? (string) $context->cookie->{self::IDENTIFY_NONCE} : '';
+    }
+
+    public static function verifyIdentifyNonce(string $token): bool
+    {
+        $nonce = self::identifyNonce();
+
+        return '' !== $nonce && '' !== $token && hash_equals($nonce, $token);
     }
 
     /**
@@ -116,6 +138,7 @@ final class IdentityService
         $context = \Context::getContext();
         $views = self::anonymousViews();
         $context->cookie->{self::ANON_COOKIE} = '';
+        $context->cookie->{self::IDENTIFY_NONCE} = '';
 
         return $views;
     }

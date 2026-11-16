@@ -66,7 +66,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.5.0';
+        $this->version = '1.6.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
