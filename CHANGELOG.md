@@ -5,6 +5,10 @@ All notable changes to `plunkconnect` are documented here.
 ## [Unreleased]
 
 ### Added
+- `plunkconnect:winback`: daily, tracks `customer.winback` for subscribed customers whose last valid order is `--days` (90) old; `--window` grace, `--backlog=N` one-time catch-up (newest first), `--exclude-file` to skip addresses. Table `plunk_winback` keeps one row per (email, last order). Release 1.10.0.
+- `plunkconnect:newsletter:new-products`: sends a Plunk campaign (subscribed contacts) with the newest products (one per category first) when at least `minProducts` appeared since the last send, at most every `intervalDays`; settings in `PLUNKCONNECT_NEWPROD`.
+
+### Added
 - Coupon rules: `excludeManufacturers` (manufacturer ids). The issued code is restricted to all other manufacturers (and products without one) with `reduction_product = -2`, so excluded brands (e.g. a supplier allowing at most 5 %) get no reduction. Percent rules only; sale items are always excluded with it (PrestaShop's selected-products percentage uses the pre-sale price). Release 1.9.0.
 
 ### Added

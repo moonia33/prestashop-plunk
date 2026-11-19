@@ -27,3 +27,11 @@ services:
     plunkconnect.command.catalog_sync:
         class: PlunkConnect\Command\SyncCatalogCommand
         tags: ['console.command']
+
+    plunkconnect.command.winback:
+        class: PlunkConnect\Command\WinbackCommand
+        tags: ['console.command']
+
+    plunkconnect.command.newsletter_new_products:
+        class: PlunkConnect\Command\NewProductsCommand
+        tags: ['console.command']

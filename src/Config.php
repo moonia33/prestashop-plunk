@@ -58,6 +58,8 @@ final class Config
     public const CONSENT_COOKIE_VALUE = self::PREFIX . 'CONSENT_COOKIE_VALUE';
 
     public const DB_VERSION = self::PREFIX . 'DB_VERSION';
+    public const NEWPROD = self::PREFIX . 'NEWPROD';
+    public const NEWPROD_LAST = self::PREFIX . 'NEWPROD_LAST';
 
     /** All keys deleted on uninstall / reset. */
     public const ALL_KEYS = [
@@ -73,6 +75,7 @@ final class Config
         self::CATALOG_LAST_SYNC, self::CATALOG_FULL_SYNC_AT,
         self::CONSENT_SOURCE, self::SHOP_CODE,
         self::CONSENT_COOKIE, self::CONSENT_COOKIE_VALUE, self::DB_VERSION,
+        self::NEWPROD, self::NEWPROD_LAST,
     ];
 
     private function __construct()

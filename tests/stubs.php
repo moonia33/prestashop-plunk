@@ -92,6 +92,7 @@ class Db
     }
 
     public const INSERT = 1;
+    public const INSERT_IGNORE = 2;
     public const REPLACE = 3;
 }
 
@@ -719,8 +720,13 @@ class Product extends ObjectModel
     /** @var bool|int */
     public $active = true;
 
-    /** @param int|string|null $id */
-    public function __construct($id = null)
+    /** @return array<string, mixed>|false */
+    public static function getCover(int $idProduct)
+    {
+        return false;
+    }
+
+    public function __construct($id = null, bool $full = false, $idLang = null, $idShop = null)
     {
     }
 

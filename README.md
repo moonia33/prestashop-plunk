@@ -203,3 +203,9 @@ Response: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "typ
 - Limits: 3 messages per IP per 10 min, 5 per email per day, counted per shop.
 - A rejected POST is neither stored nor mailed. The visitor gets a localized error, and the form keeps the typed values.
 - Site key, secret (write-only) and hostnames are stored per shop, so each shop or client uses its own widget. Turning the switch off disables the whole layer, e.g. while testing.
+
+
+## Win-back ir naujienos (cron)
+
+- `php bin/console plunkconnect:winback` – kasdien. Prenumeruojantiems pirkėjams, kurių paskutiniam galiojančiam užsakymui (`orders.valid = 1`, atšaukti ir grąžinti neįskaičiuojami) sukako `--days` (90) d., siunčiamas įvykis `customer.winback`. Vienkartiniam senesnių pirkėjų srautui: `--backlog=250` (naujausi pirmiausia), `--exclude-file=emails.txt` – adresai, kurių nesiųsti.
+- `php bin/console plunkconnect:newsletter:new-products` – kasdien. Jei nuo paskutinio siuntimo atsirado bent `minProducts` naujų aktyvių prekių su nuotrauka ir likučiu ir praėjo `intervalDays`, sukuriama ir išsiunčiama Plunk kampanija. Nustatymai `PLUNKCONNECT_NEWPROD` JSON: `subject`, `from`, `fromName`, `replyTo`, `body` (HTML su `%PRODUCTS%` ir `%NEW_URL%`), `minProducts`, `count`, `intervalDays`. `--test=el.paštas` – tik bandomasis laiškas.
