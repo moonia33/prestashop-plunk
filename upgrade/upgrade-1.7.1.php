@@ -15,8 +15,9 @@ function upgrade_module_1_7_1(Plunkconnect $module): bool
     if (!$db->execute('ALTER TABLE `' . $table . '` MODIFY `endpoint` VARCHAR(32) NOT NULL')) {
         return false;
     }
-    $db->execute('UPDATE `' . $table . '` SET `endpoint` = \'contacts_ifexists\', `status` = \'pending\', `attempts` = 0, `last_error` = NULL
-        WHERE `status` = \'dead\' AND `endpoint` = \'contacts_ifexist\'');
+    $db->execute('UPDATE `' . $table . '` SET `endpoint` = \'contacts_ifexists\' WHERE `endpoint` = \'contacts_ifexist\'');
+    $db->execute('UPDATE `' . $table . '` SET `status` = \'pending\', `attempts` = 0, `last_error` = NULL
+        WHERE `status` = \'dead\' AND `endpoint` = \'contacts_ifexists\' AND `last_error` LIKE \'unknown endpoint%\'');
 
     return (bool) Configuration::updateValue(PlunkConnect\Config::DB_VERSION, '1.7.1');
 }
