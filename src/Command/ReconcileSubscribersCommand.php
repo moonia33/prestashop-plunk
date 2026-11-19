@@ -32,7 +32,8 @@ class ReconcileSubscribersCommand extends Command
             ->setName('plunkconnect:subscribers:reconcile')
             ->setDescription('Report subscription mismatches between PrestaShop and Plunk; --apply makes PS follow Plunk.')
             ->addOption('apply', null, InputOption::VALUE_NONE, 'Set PS newsletter flags to the Plunk state (one-time sync)')
-            ->addOption('ps-only', null, InputOption::VALUE_REQUIRED, 'PS subscribers unknown to Plunk: report|unsubscribe', 'report');
+            ->addOption('ps-only', null, InputOption::VALUE_REQUIRED, 'PS subscribers unknown to Plunk: report|unsubscribe', 'report')
+            ->addOption('shop', null, InputOption::VALUE_REQUIRED, 'Shop id whose Plunk project and subscribers are compared (default: context shop)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -50,7 +51,8 @@ class ReconcileSubscribersCommand extends Command
             return 1;
         }
 
-        $client = new PlunkClient();
+        $idShop = null !== $input->getOption('shop') ? (int) $input->getOption('shop') : (int) \Context::getContext()->shop->id;
+        $client = new PlunkClient($idShop);
         $cursor = null;
         $pages = 0;
         $known = [];
@@ -73,7 +75,7 @@ class ReconcileSubscribersCommand extends Command
                 ++$stats['checked'];
                 $known[$email] = true;
                 $plunkSubscribed = (bool) ($contact['subscribed'] ?? false);
-                $target = self::targetPsState($plunkSubscribed, $this->isSubscribedInPs($email));
+                $target = self::targetPsState($plunkSubscribed, $this->isSubscribedInPs($email, $idShop));
                 if (null === $target) {
                     continue;
                 }
@@ -82,7 +84,7 @@ class ReconcileSubscribersCommand extends Command
                     $output->writeln(($target ? '  in_plunk_only: ' : '  in_ps_only:    ') . EmailMask::mask($email));
                     continue;
                 }
-                $result = SubscriptionService::applyWebhook($email, $target);
+                $result = SubscriptionService::applyWebhook($email, $target, $idShop);
                 if (0 === $result['matched']) {
                     ++$stats['not_in_ps'];
                 } else {
@@ -97,13 +99,13 @@ class ReconcileSubscribersCommand extends Command
             // An incomplete Plunk list would make every unseen PS subscriber look unknown.
             $output->writeln('<comment>Page cap reached, PS subscribers unknown to Plunk were not checked.</comment>');
         } else {
-            foreach ($this->psSubscriberEmails() as $email) {
+            foreach ($this->psSubscriberEmails($idShop) as $email) {
                 if (isset($known[$email])) {
                     continue;
                 }
                 ++$stats['ps_unknown'];
                 if ($apply && 'unsubscribe' === $psOnlyMode) {
-                    SubscriptionService::applyWebhook($email, false);
+                    SubscriptionService::applyWebhook($email, false, $idShop);
                 }
             }
         }
@@ -136,16 +138,16 @@ class ReconcileSubscribersCommand extends Command
     }
 
     /** @return string[] lower-cased emails subscribed in PS (customers and ps_emailsubscription) */
-    private function psSubscriberEmails(): array
+    private function psSubscriberEmails(int $idShop): array
     {
         $db = \Db::getInstance();
         $emails = [];
-        $rows = $db->executeS('SELECT DISTINCT LOWER(`email`) AS email FROM `' . _DB_PREFIX_ . 'customer` WHERE `newsletter` = 1 AND `deleted` = 0');
+        $rows = $db->executeS('SELECT DISTINCT LOWER(`email`) AS email FROM `' . _DB_PREFIX_ . 'customer` WHERE `newsletter` = 1 AND `deleted` = 0 AND `id_shop` = ' . $idShop);
         foreach (is_array($rows) ? $rows : [] as $row) {
             $emails[(string) $row['email']] = true;
         }
         if ($db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
-            $rows = $db->executeS('SELECT DISTINCT LOWER(`email`) AS email FROM `' . _DB_PREFIX_ . 'emailsubscription` WHERE `active` = 1');
+            $rows = $db->executeS('SELECT DISTINCT LOWER(`email`) AS email FROM `' . _DB_PREFIX_ . 'emailsubscription` WHERE `active` = 1 AND `id_shop` = ' . $idShop);
             foreach (is_array($rows) ? $rows : [] as $row) {
                 $emails[(string) $row['email']] = true;
             }
@@ -157,12 +159,12 @@ class ReconcileSubscribersCommand extends Command
     /**
      * newsletter=1 on a customer row OR active=1 in ps_emailsubscription.
      */
-    private function isSubscribedInPs(string $email): bool
+    private function isSubscribedInPs(string $email, int $idShop): bool
     {
         $db = \Db::getInstance();
         $customer = (int) $db->getValue(
             'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
-             WHERE `email` = \'' . pSQL($email) . '\' AND `newsletter` = 1 AND `deleted` = 0'
+             WHERE `email` = \'' . pSQL($email) . '\' AND `newsletter` = 1 AND `deleted` = 0 AND `id_shop` = ' . $idShop
         );
         if ($customer > 0) {
             return true;
@@ -170,7 +172,7 @@ class ReconcileSubscribersCommand extends Command
         if ($db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
             return (int) $db->getValue(
                 'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
-                 WHERE `email` = \'' . pSQL($email) . '\' AND `active` = 1'
+                 WHERE `email` = \'' . pSQL($email) . '\' AND `active` = 1 AND `id_shop` = ' . $idShop
             ) > 0;
         }
 
