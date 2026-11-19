@@ -4,6 +4,9 @@ All notable changes to `plunkconnect` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- `plunk_outbox.endpoint` was `VARCHAR(16)`, so `contacts_ifexists` was stored as `contacts_ifexist` and every `plunkconnect:orders:backfill` row went dead (`unknown endpoint`). `upgrade-1.7.1` widens it to 32 and requeues those dead rows; the release is 1.7.1.
+
 ### Added
 - `plunkconnect:subscribers:reconcile --apply [--ps-only=report|unsubscribe]`: one-time sync where PrestaShop follows Plunk. PS flags of emails Plunk knows are set to Plunk's `subscribed`; `--ps-only=unsubscribe` also unchecks PS subscribers Plunk does not know. PS subscribers unknown to Plunk are skipped when the Plunk list hit the page cap. Without `--apply` the command still only reports.
 
