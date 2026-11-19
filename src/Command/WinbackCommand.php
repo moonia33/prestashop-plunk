@@ -68,6 +68,7 @@ class WinbackCommand extends Command
         }
 
         $sent = 0;
+        $failed = 0;
         foreach ($rows as $row) {
             $email = (string) $row['email'];
             $lastAt = (string) $row['last_at'];
@@ -77,15 +78,18 @@ class WinbackCommand extends Command
                     'value' => ['lastOrderAt' => date('c', (int) strtotime($lastAt)), 'days' => $days],
                     'persistent' => false,
                 ];
-                Outbox::enqueue('track', ['event' => self::EVENT, 'email' => $email, 'data' => $data], 'winback:' . md5($email . '|' . $lastAt), 0, $idShop);
+                if (!Outbox::enqueue('track', ['event' => self::EVENT, 'email' => $email, 'data' => $data], 'winback:' . md5($email . '|' . $lastAt), 0, $idShop)) {
+                    ++$failed;
+                    continue;
+                }
                 self::mark($idShop, $email, $lastAt, 'sent');
             }
             ++$sent;
         }
 
-        $output->writeln(sprintf('%s%d customer(s), skipped %d', $dryRun ? 'would send ' : 'sent ', $sent, $skipped));
+        $output->writeln(sprintf('%s%d customer(s), skipped %d, failed %d', $dryRun ? 'would send ' : 'sent ', $sent, $skipped, $failed));
 
-        return 0;
+        return $failed > 0 ? 1 : 0;
     }
 
     /**
