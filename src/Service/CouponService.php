@@ -336,11 +336,9 @@ final class CouponService
         $idGroup = (int) $db->Insert_ID();
         $db->insert('cart_rule_product_rule', ['id_product_rule_group' => $idGroup, 'type' => 'manufacturers']);
         $idRule = (int) $db->Insert_ID();
-        $rows = [];
         foreach (self::manufacturerValues($all, $excluded) as $id) {
-            $rows[] = ['id_product_rule' => $idRule, 'id_item' => $id];
+            $db->insert('cart_rule_product_rule_value', ['id_product_rule' => $idRule, 'id_item' => $id]);
         }
-        $db->insert('cart_rule_product_rule_value', $rows);
     }
 
     /**
