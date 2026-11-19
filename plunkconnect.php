@@ -66,7 +66,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.6.0';
+        $this->version = '1.7.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -799,7 +799,7 @@ class Plunkconnect extends Module
                 'legend' => ['title' => $this->l('Coupon rules'), 'icon' => 'icon-tags'],
                 'input' => [
                     ['type' => 'textarea', 'label' => $this->l('Rules (JSON)'), 'name' => Config::COUPON_RULES,
-                        'desc' => $this->l('One entry per rule name: {"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}. Fields: type percent|amount|free_shipping, value, validDays, minAmount, prefix, excludeSpecial, event (informational).')],
+                        'desc' => $this->l('One entry per rule name: {"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}. Fields: type percent|amount|free_shipping, value, validDays, minAmount, prefix, excludeSpecial, group, event (informational). Rules sharing a group form a series: a new coupon deactivates the customer\'s earlier unused coupons of that group. Plunk coupons are never combinable with each other.')],
                 ],
                 'submit' => ['title' => $this->l('Save')],
             ]],

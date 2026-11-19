@@ -57,7 +57,7 @@ final class CouponService
         if (null !== $existing) {
             return $existing;
         }
-        // Reuse a still-live coupon issued for another cart/execution.
+        // Reuse a still-usable coupon of this rule issued for another cart/execution.
         $live = self::findLiveCoupon($email, $ruleName);
         if (null !== $live) {
             return $live;
@@ -74,7 +74,40 @@ final class CouponService
         $minAmount = max(0.0, (float) ($rule['minAmount'] ?? 0));
         $excludeSpecial = (bool) ($rule['excludeSpecial'] ?? true);
         $validUntilDate = date('Y-m-d', strtotime('+' . $validDays . ' days'));
+        $group = substr((string) preg_replace('/[^a-z0-9_-]/i', '', (string) ($rule['group'] ?? '')), 0, 64);
 
+        // Issues of one series are serialized, so retirement always sees the other coupon's row.
+        $lock = '' !== $group ? 'plunk_coupon_' . md5($idShop . '|' . $email . '|' . $group) : '';
+        if ('' !== $lock && 1 !== (int) \Db::getInstance()->getValue('SELECT GET_LOCK(\'' . pSQL($lock) . '\', 10)')) {
+            throw new \RuntimeException('lock_timeout');
+        }
+
+        try {
+            return self::issue($ruleName, $email, $cartId, $executionId, $idShop, $group, $type, $value, $prefix, $minAmount, $excludeSpecial, $validUntilDate);
+        } finally {
+            if ('' !== $lock) {
+                \Db::getInstance()->getValue('SELECT RELEASE_LOCK(\'' . pSQL($lock) . '\')');
+            }
+        }
+    }
+
+    /**
+     * @return array{code:string,validUntil:string,value:float,type:string,minAmount:float}
+     */
+    private static function issue(
+        string $ruleName,
+        string $email,
+        int $cartId,
+        string $executionId,
+        int $idShop,
+        string $group,
+        string $type,
+        float $value,
+        string $prefix,
+        float $minAmount,
+        bool $excludeSpecial,
+        string $validUntilDate,
+    ): array {
         $code = self::generateCode('' !== $prefix ? $prefix : 'PLK');
         $idCustomer = (int) \Customer::customerExists($email, true, true);
 
@@ -129,6 +162,7 @@ final class CouponService
             'id_shop' => $idShop,
             'email' => pSQL($email),
             'rule' => pSQL($ruleName),
+            'rule_group' => pSQL($group),
             'id_cart' => $cartId,
             'execution_id' => pSQL($executionId),
             'code' => pSQL($code),
@@ -138,6 +172,11 @@ final class CouponService
             'date_add' => date('Y-m-d H:i:s'),
             'date_exp' => $cartRule->date_to,
         ]);
+
+        // A series (10% -> 15% -> 20%) shares a group: only the newest coupon stays usable.
+        if ('' !== $group) {
+            self::retireGroup($idShop, $email, $group, (int) $cartRule->id);
+        }
 
         // Persist the code on the contact so a workflow email can also read
         // {{contact.lastCouponCode}} (in addition to saveResponseAs).
@@ -177,19 +216,52 @@ final class CouponService
         return is_array($row) ? self::rowToResponse($row) : null;
     }
 
-    /** @return array<string, mixed>|null */
+    /**
+     * A coupon of this rule the customer can still use: unexpired, active and
+     * not yet redeemed (a used or retired code must not be handed out again).
+     *
+     * @return array<string, mixed>|null
+     */
     private static function findLiveCoupon(string $email, string $rule): ?array
     {
         $row = \Db::getInstance()->getRow(
-            'SELECT `code`, `date_exp`, `type`, `value`, `min_amount`
-             FROM `' . _DB_PREFIX_ . 'plunk_coupon`
-             WHERE `email` = \'' . pSQL($email) . '\'
-               AND `rule` = \'' . pSQL($rule) . '\'
-               AND `date_exp` > \'' . pSQL(date('Y-m-d H:i:s')) . '\'
-             ORDER BY `date_exp` DESC'
+            'SELECT pc.`code`, pc.`date_exp`, pc.`type`, pc.`value`, pc.`min_amount`
+             FROM `' . _DB_PREFIX_ . 'plunk_coupon` pc
+             INNER JOIN `' . _DB_PREFIX_ . 'cart_rule` cr ON cr.`id_cart_rule` = pc.`id_cart_rule`
+             WHERE pc.`email` = \'' . pSQL($email) . '\'
+               AND pc.`rule` = \'' . pSQL($rule) . '\'
+               AND pc.`date_exp` > \'' . pSQL(date('Y-m-d H:i:s')) . '\'
+               AND cr.`active` = 1
+               AND cr.`quantity` > 0
+             ORDER BY pc.`date_exp` DESC'
         );
 
         return is_array($row) ? self::rowToResponse($row) : null;
+    }
+
+    /**
+     * Deactivate the customer's older unused coupons of the same group. Only
+     * older ids: of two concurrent issues the newer one survives.
+     */
+    private static function retireGroup(int $idShop, string $email, string $group, int $keepCartRuleId): void
+    {
+        $rows = \Db::getInstance()->executeS(
+            'SELECT pc.`id_cart_rule`
+             FROM `' . _DB_PREFIX_ . 'plunk_coupon` pc
+             INNER JOIN `' . _DB_PREFIX_ . 'cart_rule` cr ON cr.`id_cart_rule` = pc.`id_cart_rule`
+             WHERE pc.`id_shop` = ' . $idShop . '
+               AND pc.`email` = \'' . pSQL($email) . '\'
+               AND pc.`rule_group` = \'' . pSQL($group) . '\'
+               AND pc.`id_cart_rule` < ' . $keepCartRuleId . '
+               AND cr.`active` = 1
+               AND cr.`quantity` > 0'
+        );
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            $id = (int) $row['id_cart_rule'];
+            \Db::getInstance()->update('cart_rule', ['active' => 0, 'date_upd' => date('Y-m-d H:i:s')], '`id_cart_rule` = ' . $id);
+            // Drop it from open carts so checkout does not keep a retired code.
+            \Db::getInstance()->delete('cart_cart_rule', '`id_cart_rule` = ' . $id);
+        }
     }
 
     private static function countRecent(string $email, string $rule): int
