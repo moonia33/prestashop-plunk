@@ -75,6 +75,7 @@ final class CouponService
         $excludeSpecial = (bool) ($rule['excludeSpecial'] ?? true);
         $validUntilDate = date('Y-m-d', strtotime('+' . $validDays . ' days'));
         $group = substr((string) preg_replace('/[^a-z0-9_-]/i', '', (string) ($rule['group'] ?? '')), 0, 64);
+        $excludeManufacturers = array_values(array_filter(array_map('intval', (array) ($rule['excludeManufacturers'] ?? [])), static fn (int $id): bool => $id > 0));
 
         // Issues of one series are serialized, so retirement always sees the other coupon's row.
         $lock = '' !== $group ? 'plunk_coupon_' . md5($idShop . '|' . $email . '|' . $group) : '';
@@ -83,7 +84,7 @@ final class CouponService
         }
 
         try {
-            return self::issue($ruleName, $email, $cartId, $executionId, $idShop, $group, $type, $value, $prefix, $minAmount, $excludeSpecial, $validUntilDate);
+            return self::issue($ruleName, $email, $cartId, $executionId, $idShop, $group, $type, $value, $prefix, $minAmount, $excludeSpecial, $validUntilDate, $excludeManufacturers);
         } finally {
             if ('' !== $lock) {
                 \Db::getInstance()->getValue('SELECT RELEASE_LOCK(\'' . pSQL($lock) . '\')');
@@ -107,6 +108,7 @@ final class CouponService
         float $minAmount,
         bool $excludeSpecial,
         string $validUntilDate,
+        array $excludeManufacturers = [],
     ): array {
         $code = self::generateCode('' !== $prefix ? $prefix : 'PLK');
         $idCustomer = (int) \Customer::customerExists($email, true, true);
@@ -153,8 +155,17 @@ final class CouponService
             $cartRule->id_customer = $idCustomer;
         }
 
+        if ([] !== $excludeManufacturers) {
+            $cartRule->product_restriction = 1;
+            // Percent reductions apply to the restricted ("selected") products only.
+            $cartRule->reduction_product = -2;
+        }
+
         if (!$cartRule->add()) {
             throw new \RuntimeException('CartRule creation failed');
+        }
+        if ([] !== $excludeManufacturers) {
+            self::restrictManufacturers((int) $cartRule->id, $excludeManufacturers);
         }
 
         \Db::getInstance()->insert('plunk_coupon', [
@@ -309,5 +320,43 @@ final class CouponService
         } while ($exists > 0);
 
         return $code;
+    }
+
+    /**
+     * Restrict a cart rule to every manufacturer except `$excluded`; PrestaShop
+     * rules can only include, so the excluded brands get no reduction.
+     *
+     * @param int[] $excluded
+     */
+    private static function restrictManufacturers(int $idCartRule, array $excluded): void
+    {
+        $db = \Db::getInstance();
+        $all = array_map('intval', array_column((array) $db->executeS('SELECT `id_manufacturer` FROM `' . _DB_PREFIX_ . 'manufacturer`'), 'id_manufacturer'));
+        $db->insert('cart_rule_product_rule_group', ['id_cart_rule' => $idCartRule, 'quantity' => 1]);
+        $idGroup = (int) $db->Insert_ID();
+        $db->insert('cart_rule_product_rule', ['id_product_rule_group' => $idGroup, 'type' => 'manufacturers']);
+        $idRule = (int) $db->Insert_ID();
+        $rows = [];
+        foreach (self::manufacturerValues($all, $excluded) as $id) {
+            $rows[] = ['id_product_rule' => $idRule, 'id_item' => $id];
+        }
+        $db->insert('cart_rule_product_rule_value', $rows);
+    }
+
+    /**
+     * Rule values for "all manufacturers but these": 0 keeps products without
+     * a manufacturer eligible (PrestaShop compares `id_manufacturer` loosely).
+     *
+     * @param int[] $all
+     * @param int[] $excluded
+     *
+     * @return int[]
+     */
+    public static function manufacturerValues(array $all, array $excluded): array
+    {
+        $values = array_values(array_unique(array_diff(array_merge([0], $all), $excluded)));
+        sort($values);
+
+        return $values;
     }
 }
