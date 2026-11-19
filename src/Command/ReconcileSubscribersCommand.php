@@ -75,7 +75,19 @@ class ReconcileSubscribersCommand extends Command
                 ++$stats['checked'];
                 $known[$email] = true;
                 $plunkSubscribed = (bool) ($contact['subscribed'] ?? false);
-                $target = self::targetPsState($plunkSubscribed, $this->psDiffers($email, $plunkSubscribed, $idShop));
+                $differs = $this->psDiffers($email, $plunkSubscribed, $idShop);
+                if (null === $differs) {
+                    // No PS row at all: nothing to write, but a subscribed contact is still Plunk-only.
+                    if ($plunkSubscribed) {
+                        ++$stats['plunk_only'];
+                        ++$stats['not_in_ps'];
+                        if (!$apply) {
+                            $output->writeln('  in_plunk_only: ' . EmailMask::mask($email));
+                        }
+                    }
+                    continue;
+                }
+                $target = self::targetPsState($plunkSubscribed, $differs);
                 if (null === $target) {
                     continue;
                 }
@@ -160,25 +172,28 @@ class ReconcileSubscribersCommand extends Command
      * Whether any PS source of the email (customer newsletter flag or
      * ps_emailsubscription row) is not in the given state: a guest row can
      * be active while the account checkbox is off, or the other way round.
+     * Null when PS has no row for the email.
      */
-    private function psDiffers(string $email, bool $subscribed, int $idShop): bool
+    private function psDiffers(string $email, bool $subscribed, int $idShop): ?bool
     {
         $db = \Db::getInstance();
         $flag = $subscribed ? 1 : 0;
-        $customer = (int) $db->getValue(
-            'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
-             WHERE `email` = \'' . pSQL($email) . '\' AND `newsletter` <> ' . $flag . ' AND `deleted` = 0 AND `id_shop` = ' . $idShop
+        $where = '`email` = \'' . pSQL($email) . '\' AND `id_shop` = ' . $idShop;
+        $row = $db->getRow(
+            'SELECT COUNT(*) AS total, COALESCE(SUM(`newsletter` <> ' . $flag . '), 0) AS differ
+             FROM `' . _DB_PREFIX_ . 'customer` WHERE ' . $where . ' AND `deleted` = 0'
         );
-        if ($customer > 0) {
-            return true;
-        }
+        $total = (int) ($row['total'] ?? 0);
+        $differ = (int) ($row['differ'] ?? 0);
         if ($db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
-            return (int) $db->getValue(
-                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
-                 WHERE `email` = \'' . pSQL($email) . '\' AND `active` <> ' . $flag . ' AND `id_shop` = ' . $idShop
-            ) > 0;
+            $row = $db->getRow(
+                'SELECT COUNT(*) AS total, COALESCE(SUM(`active` <> ' . $flag . '), 0) AS differ
+                 FROM `' . _DB_PREFIX_ . 'emailsubscription` WHERE ' . $where
+            );
+            $total += (int) ($row['total'] ?? 0);
+            $differ += (int) ($row['differ'] ?? 0);
         }
 
-        return false;
+        return 0 === $total ? null : $differ > 0;
     }
 }
