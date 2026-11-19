@@ -92,6 +92,7 @@ class Db
     }
 
     public const INSERT = 1;
+    public const INSERT_IGNORE = 2;
     public const REPLACE = 3;
 }
 
@@ -316,6 +317,14 @@ class Customer extends ObjectModel
 
 class Shop
 {
+    public function __construct($id = null)
+    {
+    }
+
+    public static function setContext(int $type, $id = null): void
+    {
+    }
+
     public const CONTEXT_SHOP = 1;
     public const CONTEXT_GROUP = 2;
     public const CONTEXT_ALL = 4;
@@ -719,8 +728,13 @@ class Product extends ObjectModel
     /** @var bool|int */
     public $active = true;
 
-    /** @param int|string|null $id */
-    public function __construct($id = null)
+    /** @return array<string, mixed>|false */
+    public static function getCover(int $idProduct)
+    {
+        return false;
+    }
+
+    public function __construct($id = null, bool $full = false, $idLang = null, $idShop = null)
     {
     }
 

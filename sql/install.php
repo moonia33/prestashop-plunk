@@ -25,6 +25,17 @@ $sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_outbox` (
     KEY `dedupe_key` (`dedupe_key`)
 ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
 
+$sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_winback` (
+    `id_plunk_winback` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `id_shop` INT UNSIGNED NOT NULL DEFAULT 0,
+    `email` VARCHAR(255) NOT NULL,
+    `last_order_at` DATETIME NOT NULL,
+    `status` VARCHAR(16) NOT NULL,
+    `date_add` DATETIME NOT NULL,
+    PRIMARY KEY (`id_plunk_winback`),
+    UNIQUE KEY `email_order` (`email`, `id_shop`, `last_order_at`)
+) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+
 $sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_coupon` (
     `id_plunk_coupon` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `id_cart_rule` INT UNSIGNED NOT NULL,
