@@ -789,6 +789,10 @@ class CartRule extends ObjectModel
     /** @var bool|int */
     public $reduction_exclude_special = false;
     /** @var bool|int */
+    public $product_restriction = false;
+    /** @var int */
+    public $reduction_product = 0;
+    /** @var bool|int */
     public $cart_rule_restriction = false;
     /** @var float */
     public $reduction_percent = 0.0;
