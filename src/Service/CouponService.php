@@ -207,7 +207,10 @@ final class CouponService
         return is_array($row) ? self::rowToResponse($row) : null;
     }
 
-    /** Deactivate the customer's other unused coupons of the same group. */
+    /**
+     * Deactivate the customer's older unused coupons of the same group. Only
+     * older ids: of two concurrent issues the newer one survives.
+     */
     private static function retireGroup(int $idShop, string $email, string $group, int $keepCartRuleId): void
     {
         $rows = \Db::getInstance()->executeS(
@@ -217,7 +220,7 @@ final class CouponService
              WHERE pc.`id_shop` = ' . $idShop . '
                AND pc.`email` = \'' . pSQL($email) . '\'
                AND pc.`rule_group` = \'' . pSQL($group) . '\'
-               AND pc.`id_cart_rule` <> ' . $keepCartRuleId . '
+               AND pc.`id_cart_rule` < ' . $keepCartRuleId . '
                AND cr.`active` = 1
                AND cr.`quantity` > 0'
         );
