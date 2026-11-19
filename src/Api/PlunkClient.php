@@ -88,11 +88,39 @@ final class PlunkClient
 
     /**
      * Raw lookup response (with status) so callers can tell "not found"
-     * apart from "lookup failed".
+     * (404) apart from "lookup failed". `POST /contacts/lookup` only returns
+     * found/notFound emails, so the contact (with id) is resolved through
+     * the contact search and an exact email match.
      */
     public function lookupContactResponse(string $email): array
     {
-        return $this->request('POST', '/contacts/lookup', $this->secretKey, ['email' => $email]);
+        $response = $this->request('GET', '/contacts?limit=100&search=' . rawurlencode($email), $this->secretKey, null);
+        if (200 !== $response['status']) {
+            return $response;
+        }
+        $contact = self::matchContact($response['body'] ?? [], $email);
+        if (null === $contact) {
+            return ['status' => 404, 'retryAfter' => null, 'error' => null, 'body' => null];
+        }
+
+        return ['body' => $contact] + $response;
+    }
+
+    /**
+     * The contact of a `GET /contacts` page whose email equals $email
+     * (case-insensitive), or null. Pure function - unit-tested.
+     */
+    public static function matchContact(array $body, string $email): ?array
+    {
+        $email = strtolower(trim($email));
+        $contacts = $body['contacts'] ?? $body['data'] ?? (array_is_list($body) ? $body : []);
+        foreach ((array) $contacts as $contact) {
+            if (is_array($contact) && strtolower(trim((string) ($contact['email'] ?? ''))) === $email) {
+                return $contact;
+            }
+        }
+
+        return null;
     }
 
     /**
