@@ -317,6 +317,14 @@ class Customer extends ObjectModel
 
 class Shop
 {
+    public function __construct($id = null)
+    {
+    }
+
+    public static function setContext(int $type, $id = null): void
+    {
+    }
+
     public const CONTEXT_SHOP = 1;
     public const CONTEXT_GROUP = 2;
     public const CONTEXT_ALL = 4;

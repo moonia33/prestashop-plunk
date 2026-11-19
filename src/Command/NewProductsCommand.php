@@ -38,6 +38,11 @@ class NewProductsCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $idShop = null !== $input->getOption('shop') ? (int) $input->getOption('shop') : (int) \Context::getContext()->shop->id;
+        if (null !== $input->getOption('shop')) {
+            // Prices, covers and links read the context shop.
+            \Shop::setContext(\Shop::CONTEXT_SHOP, $idShop);
+            \Context::getContext()->shop = new \Shop($idShop);
+        }
         $idLang = (int) \Configuration::get('PS_LANG_DEFAULT', null, null, $idShop);
         $cfg = Config::getJson(Config::NEWPROD, $idShop);
         $test = (string) $input->getOption('test');
@@ -109,7 +114,7 @@ class NewProductsCommand extends Command
             return 1;
         }
         if ('' === $test) {
-            Config::set(Config::NEWPROD_LAST, date('Y-m-d H:i:s'));
+            \Configuration::updateValue(Config::NEWPROD_LAST, date('Y-m-d H:i:s'), false, null, $idShop);
         }
         $output->writeln(('' !== $test ? 'test sent' : 'campaign sent') . ': ' . $id);
 
