@@ -157,8 +157,8 @@ final class ContactGuardService
 
     private static function isNewsletterController(\FrontController $controller): bool
     {
-        return $controller instanceof \ModuleFrontController
-            && 'ps_emailsubscription' === (string) ($controller->module->name ?? '');
+        // Only the subscription controller: verification links carry no token.
+        return 0 === strcasecmp(get_class($controller), 'Ps_EmailsubscriptionSubscriptionModuleFrontController');
     }
 
     private static function newsletterOverLimit(string $ip): bool
