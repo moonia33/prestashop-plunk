@@ -22,6 +22,7 @@ function upgrade_module_1_10_0(Plunkconnect $module): bool
 ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci')) {
         return false;
     }
+    $module->enableServicesYaml();
 
     return (bool) Configuration::updateValue(PlunkConnect\Config::DB_VERSION, '1.10.0');
 }
