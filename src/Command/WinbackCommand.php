@@ -128,7 +128,7 @@ class WinbackCommand extends Command
                 HAVING MAX(c.`newsletter`) = 1
              ) t
              LEFT JOIN `' . _DB_PREFIX_ . self::TABLE . '` w
-               ON w.`email` = t.`email` AND w.`id_shop` = ' . $idShop . ' AND w.`last_order_at` = t.`last_at`
+               ON w.`email` = CONVERT(t.`email` USING utf8mb4) COLLATE utf8mb4_unicode_ci AND w.`id_shop` = ' . $idShop . ' AND w.`last_order_at` = t.`last_at`
              WHERE ' . $where . '
              ORDER BY t.`last_at` DESC
              LIMIT ' . $limit
