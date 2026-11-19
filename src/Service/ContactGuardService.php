@@ -104,7 +104,7 @@ final class ContactGuardService
      */
     public static function guard(\FrontController $controller): void
     {
-        if (\Tools::isSubmit('submitNewsletter') && self::isNewsletterActive()) {
+        if ((\Tools::isSubmit('submitNewsletter') || self::isNewsletterController($controller)) && self::isNewsletterActive()) {
             self::guardNewsletter($controller);
         }
         if ('contact' !== ($controller->php_self ?? '') || !\Tools::isSubmit('submitMessage') || !self::isActive()) {
@@ -143,9 +143,22 @@ final class ContactGuardService
             && self::verifyToken((string) \Tools::getValue(self::TOKEN_FIELD), $ip, self::ACTION_NEWSLETTER)) {
             return;
         }
-        unset($_POST['submitNewsletter'], $_GET['submitNewsletter']);
         $iso = (string) (\Context::getContext()->language->iso_code ?? 'en');
-        $controller->errors[] = self::MESSAGES['verify'][$iso] ?? self::MESSAGES['verify']['en'];
+        $message = self::MESSAGES['verify'][$iso] ?? self::MESSAGES['verify']['en'];
+        if (self::isNewsletterController($controller) && \Tools::getValue('ajax')) {
+            // ps_emailsubscription's subscription controller registers every
+            // AJAX request, with or without `submitNewsletter`.
+            header('Content-Type: application/json');
+            exit(json_encode(['nw_error' => true, 'msg' => $message]));
+        }
+        unset($_POST['submitNewsletter'], $_GET['submitNewsletter']);
+        $controller->errors[] = $message;
+    }
+
+    private static function isNewsletterController(\FrontController $controller): bool
+    {
+        return $controller instanceof \ModuleFrontController
+            && 'ps_emailsubscription' === (string) ($controller->module->name ?? '');
     }
 
     private static function newsletterOverLimit(string $ip): bool
