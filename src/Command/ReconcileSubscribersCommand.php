@@ -75,7 +75,7 @@ class ReconcileSubscribersCommand extends Command
                 ++$stats['checked'];
                 $known[$email] = true;
                 $plunkSubscribed = (bool) ($contact['subscribed'] ?? false);
-                $target = self::targetPsState($plunkSubscribed, $this->isSubscribedInPs($email, $idShop));
+                $target = self::targetPsState($plunkSubscribed, $this->psDiffers($email, $plunkSubscribed, $idShop));
                 if (null === $target) {
                     continue;
                 }
@@ -130,11 +130,11 @@ class ReconcileSubscribersCommand extends Command
     }
 
     /**
-     * The PS state to write so PS follows Plunk, or null when they agree.
+     * The PS state to write so PS follows Plunk, or null when every PS source already matches.
      */
-    public static function targetPsState(bool $plunkSubscribed, bool $psSubscribed): ?bool
+    public static function targetPsState(bool $plunkSubscribed, bool $psDiffers): ?bool
     {
-        return $plunkSubscribed === $psSubscribed ? null : $plunkSubscribed;
+        return $psDiffers ? $plunkSubscribed : null;
     }
 
     /** @return string[] lower-cased emails subscribed in PS (customers and ps_emailsubscription) */
@@ -157,14 +157,17 @@ class ReconcileSubscribersCommand extends Command
     }
 
     /**
-     * newsletter=1 on a customer row OR active=1 in ps_emailsubscription.
+     * Whether any PS source of the email (customer newsletter flag or
+     * ps_emailsubscription row) is not in the given state: a guest row can
+     * be active while the account checkbox is off, or the other way round.
      */
-    private function isSubscribedInPs(string $email, int $idShop): bool
+    private function psDiffers(string $email, bool $subscribed, int $idShop): bool
     {
         $db = \Db::getInstance();
+        $flag = $subscribed ? 1 : 0;
         $customer = (int) $db->getValue(
             'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'customer`
-             WHERE `email` = \'' . pSQL($email) . '\' AND `newsletter` = 1 AND `deleted` = 0 AND `id_shop` = ' . $idShop
+             WHERE `email` = \'' . pSQL($email) . '\' AND `newsletter` <> ' . $flag . ' AND `deleted` = 0 AND `id_shop` = ' . $idShop
         );
         if ($customer > 0) {
             return true;
@@ -172,7 +175,7 @@ class ReconcileSubscribersCommand extends Command
         if ($db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
             return (int) $db->getValue(
                 'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
-                 WHERE `email` = \'' . pSQL($email) . '\' AND `active` = 1 AND `id_shop` = ' . $idShop
+                 WHERE `email` = \'' . pSQL($email) . '\' AND `active` <> ' . $flag . ' AND `id_shop` = ' . $idShop
             ) > 0;
         }
 
