@@ -2,6 +2,17 @@
 
 All notable changes to `plunkconnect` are documented here.
 
+## [1.7.0] - 2026-11-19
+
+### Added
+- Coupon rule `group`: rules sharing a group form a series (e.g. 10% -> 15% -> 20%). Issuing a coupon deactivates the customer's earlier unused coupons of that group and removes them from open carts, so only the newest one is usable.
+
+### Fixed
+- A redeemed or deactivated coupon is no longer handed out again for the same rule (live-coupon reuse now requires an active cart rule with quantity left).
+
+### Upgrade
+- `upgrade-1.7.0`: adds `plunk_coupon.rule_group` and index `email_group`.
+
 ## [1.6.0] - 2026-11-16
 
 ### Added

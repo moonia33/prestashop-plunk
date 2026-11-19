@@ -31,6 +31,7 @@ $sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_coupon` (
     `id_shop` INT UNSIGNED NOT NULL DEFAULT 0,
     `email` VARCHAR(255) NOT NULL,
     `rule` VARCHAR(64) NOT NULL,
+    `rule_group` VARCHAR(64) NOT NULL DEFAULT \'\',
     `id_cart` INT UNSIGNED NOT NULL DEFAULT 0,
     `execution_id` VARCHAR(64) NOT NULL DEFAULT \'\',
     `code` VARCHAR(64) NOT NULL,
@@ -44,6 +45,7 @@ $sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_coupon` (
     UNIQUE KEY `code` (`code`),
     UNIQUE KEY `idem` (`email`, `rule`, `id_cart`, `execution_id`),
     KEY `email_rule` (`email`, `rule`),
+    KEY `email_group` (`email`, `rule_group`),
     KEY `date_exp` (`date_exp`)
 ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
 
