@@ -19,7 +19,7 @@ function upgrade_module_1_10_0(Plunkconnect $module): bool
     `date_add` DATETIME NOT NULL,
     PRIMARY KEY (`id_plunk_winback`),
     UNIQUE KEY `email_order` (`email`, `id_shop`, `last_order_at`)
-) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'')) {
+) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci')) {
         return false;
     }
 
