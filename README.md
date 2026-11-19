@@ -183,6 +183,8 @@ All coupon parameters come from admin → Coupon rules (JSON), never from the re
 {"welcome10": {"type": "percent", "value": 10, "validDays": 30, "minAmount": 30, "prefix": "BZ", "excludeSpecial": true}}
 ```
 
+`excludeManufacturers` (gamintojų ID sąrašas, pvz. `[65]`): išduotas kodas apribojamas visais kitais gamintojais ir prekėmis be gamintojo, todėl nurodytų gamintojų prekėms nuolaida netaikoma (kodas joms negalioja, jei krepšelyje tik jos). Su šiuo nustatymu kodas akcijinėms prekėms netaikomas (`excludeSpecial` priverstinai `true`), nes PrestaShop tokiu atveju nuolaidą skaičiuotų nuo kainos be akcijos.
+
 Response: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "type": "percent", "minAmount": 30}`
 
 - Code: `PREFIX-` + 8 unambiguous chars; `quantity=1`, `quantity_per_user=1`, not combinable, `reduction_exclude_special` per rule; bound to `id_customer` for registered customers.

@@ -5,6 +5,9 @@ All notable changes to `plunkconnect` are documented here.
 ## [Unreleased]
 
 ### Added
+- Coupon rules: `excludeManufacturers` (manufacturer ids). The issued code is restricted to all other manufacturers (and products without one) with `reduction_product = -2`, so excluded brands (e.g. a supplier allowing at most 5 %) get no reduction. Percent rules only; sale items are always excluded with it (PrestaShop's selected-products percentage uses the pre-sale price). Release 1.9.0.
+
+### Added
 - Newsletter form protection (`FEAT_NEWSLETTER_TURNSTILE`, off by default): `ps_emailsubscription` subscribe requests need a valid Turnstile token (action `newsletter`, same site key/secret as the contact form) and at most 3 sign-ups per IP per hour; the widget renders through `displayNewsletterRegistration`. Unsubscribe requests are not checked. `upgrade-1.8.0` registers the hook; the release is 1.8.0.
 
 ### Fixed
