@@ -76,6 +76,10 @@ final class CouponService
         $validUntilDate = date('Y-m-d', strtotime('+' . $validDays . ' days'));
         $group = substr((string) preg_replace('/[^a-z0-9_-]/i', '', (string) ($rule['group'] ?? '')), 0, 64);
         $excludeManufacturers = array_values(array_filter(array_map('intval', (array) ($rule['excludeManufacturers'] ?? [])), static fn (int $id): bool => $id > 0));
+        if ([] !== $excludeManufacturers && 'percent' !== $type) {
+            // PrestaShop only computes "selected products" reductions for percentages.
+            throw new \RuntimeException('excludeManufacturers needs a percent rule');
+        }
 
         // Issues of one series are serialized, so retirement always sees the other coupon's row.
         $lock = '' !== $group ? 'plunk_coupon_' . md5($idShop . '|' . $email . '|' . $group) : '';
