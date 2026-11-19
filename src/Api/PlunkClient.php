@@ -94,16 +94,23 @@ final class PlunkClient
      */
     public function lookupContactResponse(string $email): array
     {
-        $response = $this->request('GET', '/contacts?limit=100&search=' . rawurlencode($email), $this->secretKey, null);
-        if (200 !== $response['status']) {
-            return $response;
-        }
-        $contact = self::matchContact($response['body'] ?? [], $email);
-        if (null === $contact) {
-            return ['status' => 404, 'retryAfter' => null, 'error' => null, 'body' => null];
-        }
+        $cursor = null;
+        do {
+            $response = $this->request('GET', '/contacts?limit=100&search=' . rawurlencode($email)
+                . (null !== $cursor ? '&cursor=' . rawurlencode($cursor) : ''), $this->secretKey, null);
+            if (200 !== $response['status']) {
+                return $response;
+            }
+            $body = $response['body'] ?? [];
+            $contact = self::matchContact($body, $email);
+            if (null !== $contact) {
+                return ['body' => $contact] + $response;
+            }
+            $next = $body['nextCursor'] ?? $body['cursor'] ?? null;
+            $cursor = is_string($next) && '' !== $next && $next !== $cursor ? $next : null;
+        } while (null !== $cursor);
 
-        return ['body' => $contact] + $response;
+        return ['status' => 404, 'retryAfter' => null, 'error' => null, 'body' => null];
     }
 
     /**
