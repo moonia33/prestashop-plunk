@@ -175,7 +175,7 @@ final class ContactGuardService
             'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
              WHERE `ip_registration_newsletter` = \'' . pSQL($ip) . '\'
                AND `id_shop` = ' . (int) (\Context::getContext()->shop->id ?? 0) . '
-               AND `newsletter_date_add` > \'' . pSQL(date('Y-m-d H:i:s', time() - 3600)) . '\''
+               AND `newsletter_date_add` > NOW() - INTERVAL 1 HOUR'
         ) >= self::MAX_NEWSLETTER_PER_IP_HOUR;
     }
 
