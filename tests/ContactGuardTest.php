@@ -49,4 +49,11 @@ class ContactGuardTest extends TestCase
         $this->assertStringContainsString('data-action="contact_form"', $html);
         $this->assertSame('', ContactGuardService::renderWidget(''));
     }
+
+    public function testNewsletterActionIsSeparate(): void
+    {
+        $ok = ['success' => true, 'action' => 'newsletter', 'hostname' => 'example.com'];
+        $this->assertTrue(ContactGuardService::isValidResponse($ok, self::HOSTS, ContactGuardService::ACTION_NEWSLETTER));
+        $this->assertFalse(ContactGuardService::isValidResponse($ok, self::HOSTS));
+    }
 }

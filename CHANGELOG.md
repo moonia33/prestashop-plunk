@@ -4,6 +4,9 @@ All notable changes to `plunkconnect` are documented here.
 
 ## [Unreleased]
 
+### Added
+- Newsletter form protection (`FEAT_NEWSLETTER_TURNSTILE`, off by default): `ps_emailsubscription` subscribe requests need a valid Turnstile token (action `newsletter`, same site key/secret as the contact form) and at most 3 sign-ups per IP per hour; the widget renders through `displayNewsletterRegistration`. Unsubscribe requests are not checked. `upgrade-1.8.0` registers the hook; the release is 1.8.0.
+
 ### Fixed
 - `plunk_outbox.endpoint` was `VARCHAR(16)`, so `contacts_ifexists` was stored as `contacts_ifexist` and every `plunkconnect:orders:backfill` row went dead (`unknown endpoint`). `upgrade-1.7.1` widens it to 32 and requeues those dead rows; the release is 1.7.1.
 

@@ -44,6 +44,7 @@ final class Config
     public const FEAT_CATALOG_SYNC = self::PREFIX . 'FEAT_CATALOG_SYNC';
     public const FEAT_FORMS = self::PREFIX . 'FEAT_FORMS';
     public const FEAT_CONTACT_TURNSTILE = self::PREFIX . 'FEAT_CONTACT_TURNSTILE';
+    public const FEAT_NEWSLETTER_TURNSTILE = self::PREFIX . 'FEAT_NEWSLETTER_TURNSTILE';
     public const TURNSTILE_SITE_KEY = self::PREFIX . 'TURNSTILE_SITE_KEY';
     public const TURNSTILE_SECRET = self::PREFIX . 'TURNSTILE_SECRET';
     /** Comma-separated frontend hostnames accepted from Siteverify; empty = shop domains. */
@@ -67,7 +68,7 @@ final class Config
         self::FEAT_SUBSCRIPTIONS, self::FEAT_DOUBLE_OPTIN, self::FEAT_VIEWS,
         self::FEAT_CART, self::FEAT_ORDERS, self::FEAT_FEED, self::FEAT_COUPONS,
         self::FEAT_BACKINSTOCK, self::FEAT_PK_CAPTURE,
-        self::FEAT_CATALOG_SYNC, self::FEAT_FORMS, self::FEAT_CONTACT_TURNSTILE,
+        self::FEAT_CATALOG_SYNC, self::FEAT_FORMS, self::FEAT_CONTACT_TURNSTILE, self::FEAT_NEWSLETTER_TURNSTILE,
         self::TURNSTILE_SITE_KEY, self::TURNSTILE_SECRET, self::TURNSTILE_HOSTNAMES,
         self::CATALOG_LAST_SYNC, self::CATALOG_FULL_SYNC_AT,
         self::CONSENT_SOURCE, self::SHOP_CODE,

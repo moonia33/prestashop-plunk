@@ -41,6 +41,7 @@ class Plunkconnect extends Module
         'displayHeader',
         'actionFrontControllerInitAfter',
         'displayGDPRConsent',
+        'displayNewsletterRegistration',
         'actionUpdateQuantity',
         'actionObjectStockAvailableUpdateAfter',
         'actionProductAdd',
@@ -66,7 +67,7 @@ class Plunkconnect extends Module
     {
         $this->name = 'plunkconnect';
         $this->tab = 'advertising_marketing';
-        $this->version = '1.7.1';
+        $this->version = '1.8.0';
         $this->author = 'TV Parkas';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -141,6 +142,7 @@ class Plunkconnect extends Module
         Config::set(Config::FEAT_CATALOG_SYNC, 0);
         Config::set(Config::FEAT_FORMS, 0);
         Config::set(Config::FEAT_CONTACT_TURNSTILE, 0);
+        Config::set(Config::FEAT_NEWSLETTER_TURNSTILE, 0);
         Config::set(Config::CONSENT_SOURCE, 'website_signup');
         Config::set(Config::DB_VERSION, $this->version);
 
@@ -320,6 +322,15 @@ class Plunkconnect extends Module
     {
         try {
             return ContactGuardService::widgetHtml((int) ($params['id_module'] ?? 0));
+        } catch (Throwable $e) {
+            return '';
+        }
+    }
+
+    public function hookDisplayNewsletterRegistration(array $params): string
+    {
+        try {
+            return ContactGuardService::newsletterWidgetHtml();
         } catch (Throwable $e) {
             return '';
         }
@@ -635,7 +646,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS, Config::FEAT_CONTACT_TURNSTILE] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS, Config::FEAT_CONTACT_TURNSTILE, Config::FEAT_NEWSLETTER_TURNSTILE] as $key) {
             Config::set($key, (int) (bool) Tools::getValue($key));
         }
 
@@ -887,6 +898,7 @@ class Plunkconnect extends Module
             [Config::FEAT_CATALOG_SYNC, 'Catalog sync to Plunk (products -> /catalog/products)'],
             [Config::FEAT_FORMS, 'Plunk signup forms (embed script; forms are managed in Plunk)'],
             [Config::FEAT_CONTACT_TURNSTILE, 'Contact form protection (Turnstile + rate limit; needs keys below)'],
+            [Config::FEAT_NEWSLETTER_TURNSTILE, 'Newsletter form protection (ps_emailsubscription: Turnstile + IP limit; same keys)'],
         ];
 
         $inputs = [];
@@ -929,7 +941,7 @@ class Plunkconnect extends Module
         foreach ([Config::FEAT_SUBSCRIPTIONS, Config::FEAT_DOUBLE_OPTIN, Config::FEAT_VIEWS,
             Config::FEAT_CART, Config::FEAT_ORDERS, Config::FEAT_FEED,
             Config::FEAT_COUPONS, Config::FEAT_BACKINSTOCK, Config::FEAT_PK_CAPTURE,
-            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS, Config::FEAT_CONTACT_TURNSTILE] as $key) {
+            Config::FEAT_CATALOG_SYNC, Config::FEAT_FORMS, Config::FEAT_CONTACT_TURNSTILE, Config::FEAT_NEWSLETTER_TURNSTILE] as $key) {
             $values[$key] = (int) Config::getBool($key);
         }
         foreach (LocaleMapper::shopLanguages() as $idLang => $iso) {
