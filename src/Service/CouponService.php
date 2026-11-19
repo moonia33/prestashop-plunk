@@ -143,7 +143,7 @@ final class CouponService
 
         // A series (10% -> 15% -> 20%) shares a group: only the newest coupon stays usable.
         if ('' !== $group) {
-            self::retireGroup($email, $group, (int) $cartRule->id);
+            self::retireGroup($idShop, $email, $group, (int) $cartRule->id);
         }
 
         // Persist the code on the contact so a workflow email can also read
@@ -208,13 +208,14 @@ final class CouponService
     }
 
     /** Deactivate the customer's other unused coupons of the same group. */
-    private static function retireGroup(string $email, string $group, int $keepCartRuleId): void
+    private static function retireGroup(int $idShop, string $email, string $group, int $keepCartRuleId): void
     {
         $rows = \Db::getInstance()->executeS(
             'SELECT pc.`id_cart_rule`
              FROM `' . _DB_PREFIX_ . 'plunk_coupon` pc
              INNER JOIN `' . _DB_PREFIX_ . 'cart_rule` cr ON cr.`id_cart_rule` = pc.`id_cart_rule`
-             WHERE pc.`email` = \'' . pSQL($email) . '\'
+             WHERE pc.`id_shop` = ' . $idShop . '
+               AND pc.`email` = \'' . pSQL($email) . '\'
                AND pc.`rule_group` = \'' . pSQL($group) . '\'
                AND pc.`id_cart_rule` <> ' . $keepCartRuleId . '
                AND cr.`active` = 1
