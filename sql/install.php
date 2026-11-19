@@ -9,7 +9,7 @@ $sql[] = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'plunk_outbox` (
     `id_outbox` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `id_shop` INT UNSIGNED NOT NULL DEFAULT 0,
     `uuid` VARCHAR(36) NOT NULL,
-    `endpoint` VARCHAR(16) NOT NULL,
+    `endpoint` VARCHAR(32) NOT NULL,
     `dedupe_key` VARCHAR(191) DEFAULT NULL,
     `payload` MEDIUMTEXT NOT NULL,
     `status` ENUM(\'pending\',\'processing\',\'sent\',\'failed\',\'dead\') NOT NULL DEFAULT \'pending\',
