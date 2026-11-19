@@ -76,6 +76,38 @@ final class CouponService
         $validUntilDate = date('Y-m-d', strtotime('+' . $validDays . ' days'));
         $group = substr((string) preg_replace('/[^a-z0-9_-]/i', '', (string) ($rule['group'] ?? '')), 0, 64);
 
+        // Issues of one series are serialized, so retirement always sees the other coupon's row.
+        $lock = '' !== $group ? 'plunk_coupon_' . md5($idShop . '|' . $email . '|' . $group) : '';
+        if ('' !== $lock && 1 !== (int) \Db::getInstance()->getValue('SELECT GET_LOCK(\'' . pSQL($lock) . '\', 10)')) {
+            throw new \RuntimeException('lock_timeout');
+        }
+
+        try {
+            return self::issue($ruleName, $email, $cartId, $executionId, $idShop, $group, $type, $value, $prefix, $minAmount, $excludeSpecial, $validUntilDate);
+        } finally {
+            if ('' !== $lock) {
+                \Db::getInstance()->getValue('SELECT RELEASE_LOCK(\'' . pSQL($lock) . '\')');
+            }
+        }
+    }
+
+    /**
+     * @return array{code:string,validUntil:string,value:float,type:string,minAmount:float}
+     */
+    private static function issue(
+        string $ruleName,
+        string $email,
+        int $cartId,
+        string $executionId,
+        int $idShop,
+        string $group,
+        string $type,
+        float $value,
+        string $prefix,
+        float $minAmount,
+        bool $excludeSpecial,
+        string $validUntilDate,
+    ): array {
         $code = self::generateCode('' !== $prefix ? $prefix : 'PLK');
         $idCustomer = (int) \Customer::customerExists($email, true, true);
 
