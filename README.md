@@ -76,7 +76,7 @@ Masyvai (`product`, `cart`, `order`) siunčiami kaip `{value:…, persistent:fal
 
 - `plunkconnect:outbox:process [--limit=200] [--max-seconds=50]`
 - `plunkconnect:subscribers:backfill --since=YYYY-MM-DD [--dry-run]` – `contacts_ifnew`: esamiems kontaktams `subscribed` nekeičia
-- `plunkconnect:subscribers:reconcile` – tik raportuoja neatitikimus
+- `plunkconnect:subscribers:reconcile [--apply] [--ps-only=report|unsubscribe]` – be `--apply` tik raportuoja neatitikimus (naktinis patikrinimas). Su `--apply` Plunk laikomas tiesa: Plunk žinomų adresų PS varnelės (`ps_customer.newsletter`, `ps_emailsubscription.active`) nustatomos pagal Plunk; `--ps-only=unsubscribe` papildomai nuima varnelę PS prenumeratoriams, kurių Plunk visai neturi (vienkartinė sinchronizacija, pvz. po perėjimo iš Newsman)
 - `plunkconnect:coupons:cleanup [--dry-run]` – trina pasibaigusius nepanaudotus modulio kuponus (`CartRule` + `plunk_coupon`)
 
 ### Katalogo sinchronizacija -> Plunk (`/catalog/products`)
