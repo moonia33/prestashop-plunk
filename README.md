@@ -194,6 +194,8 @@ Response: `{"code": "BZ-7Q2K9XMP", "validUntil": "2026-12-11", "value": 10, "typ
 
 `FEAT_CONTACT_TURNSTILE` (off by default) protects the PrestaShop `contactform` module:
 
+`FEAT_NEWSLETTER_TURNSTILE` (išjungta pagal nutylėjimą) tais pačiais Turnstile raktais saugo `ps_emailsubscription` naujienlaiškio formą: valdiklis rodomas per `displayNewsletterRegistration` (tema turi kviesti šį hook'ą formos viduje), prenumerata priimama tik su galiojančiu tokenu (action `newsletter`) ir ne daugiau kaip 3 kartus per valandą iš vieno IP. Atsisakymo užklausos netikrinamos.
+
 - The widget (`data-action="contact_form"`) renders through `displayGDPRConsent`, only inside the contact form. The theme template must keep `{hook h='displayGDPRConsent' id_module=$id_module}`.
 - `actionFrontControllerInitAfter` validates `cf-turnstile-response` with Siteverify before contactform runs. It checks `success === true`, the action, and the hostname against "Allowed hostnames" (empty = the shop's `domain`/`domain_ssl`). If Siteverify cannot be reached, the message is rejected (fail closed).
 - Limits: 3 messages per IP per 10 min, 5 per email per day, counted per shop.

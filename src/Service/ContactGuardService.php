@@ -1,8 +1,9 @@
 <?php
 
 /**
- * Contact form protection: Cloudflare Turnstile (server-side Siteverify)
- * and per-IP / per-email limits on the PrestaShop `contactform` module.
+ * Form protection: Cloudflare Turnstile (server-side Siteverify) and limits
+ * on the PrestaShop `contactform` (per IP / per email) and the
+ * `ps_emailsubscription` newsletter form (per IP; FEAT_NEWSLETTER_TURNSTILE).
  * Site key, secret and hostnames are per shop, so each shop / client keeps
  * its own widget. Off by default (FEAT_CONTACT_TURNSTILE).
  */
@@ -14,11 +15,13 @@ use PlunkConnect\Config;
 final class ContactGuardService
 {
     public const ACTION = 'contact_form';
+    public const ACTION_NEWSLETTER = 'newsletter';
     public const TOKEN_FIELD = 'cf-turnstile-response';
 
     private const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
     private const MAX_PER_IP_10MIN = 3;
     private const MAX_PER_EMAIL_DAY = 5;
+    private const MAX_NEWSLETTER_PER_IP_HOUR = 3;
 
     private const MESSAGES = [
         'verify' => [
@@ -41,9 +44,30 @@ final class ContactGuardService
 
     public static function isActive(): bool
     {
-        return Config::getBool(Config::FEAT_CONTACT_TURNSTILE)
-            && '' !== (string) Config::get(Config::TURNSTILE_SITE_KEY)
+        return Config::getBool(Config::FEAT_CONTACT_TURNSTILE) && self::hasKeys();
+    }
+
+    public static function isNewsletterActive(): bool
+    {
+        return Config::getBool(Config::FEAT_NEWSLETTER_TURNSTILE) && self::hasKeys();
+    }
+
+    private static function hasKeys(): bool
+    {
+        return '' !== (string) Config::get(Config::TURNSTILE_SITE_KEY)
             && '' !== (string) Config::get(Config::TURNSTILE_SECRET);
+    }
+
+    /**
+     * `displayNewsletterRegistration` output: the widget inside the newsletter form.
+     */
+    public static function newsletterWidgetHtml(): string
+    {
+        if (!self::isNewsletterActive()) {
+            return '';
+        }
+
+        return self::renderWidget((string) Config::get(Config::TURNSTILE_SITE_KEY), self::ACTION_NEWSLETTER);
     }
 
     /**
@@ -58,15 +82,18 @@ final class ContactGuardService
         return self::renderWidget((string) Config::get(Config::TURNSTILE_SITE_KEY));
     }
 
-    public static function renderWidget(string $siteKey): string
+    public static function renderWidget(string $siteKey, string $action = self::ACTION): string
     {
+        static $scriptSent = false;
         if ('' === $siteKey) {
             return '';
         }
+        $script = $scriptSent ? '' : '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>';
+        $scriptSent = true;
 
-        return '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
+        return $script
             . '<div class="cf-turnstile" data-sitekey="' . htmlspecialchars($siteKey, ENT_QUOTES, 'UTF-8')
-            . '" data-action="' . self::ACTION . '" data-language="auto"></div>';
+            . '" data-action="' . htmlspecialchars($action, ENT_QUOTES, 'UTF-8') . '" data-language="auto"></div>';
     }
 
     /**
@@ -77,6 +104,9 @@ final class ContactGuardService
      */
     public static function guard(\FrontController $controller): void
     {
+        if (\Tools::isSubmit('submitNewsletter') && self::isNewsletterActive()) {
+            self::guardNewsletter($controller);
+        }
         if ('contact' !== ($controller->php_self ?? '') || !\Tools::isSubmit('submitMessage') || !self::isActive()) {
             return;
         }
@@ -98,7 +128,45 @@ final class ContactGuardService
         $controller->errors[] = self::MESSAGES[$reason][$iso] ?? self::MESSAGES[$reason]['en'];
     }
 
-    public static function verifyToken(string $token, string $ip): bool
+    /**
+     * Runs before ps_emailsubscription reads the POST (its widget renders
+     * later): a rejected subscribe has `submitNewsletter` removed, so nothing
+     * is stored. Unsubscribe requests (`action=1`) are left alone.
+     */
+    private static function guardNewsletter(\FrontController $controller): void
+    {
+        if ('1' === (string) \Tools::getValue('action')) {
+            return;
+        }
+        $ip = (string) \Tools::getRemoteAddr();
+        if (!self::newsletterOverLimit($ip)
+            && self::verifyToken((string) \Tools::getValue(self::TOKEN_FIELD), $ip, self::ACTION_NEWSLETTER)) {
+            return;
+        }
+        unset($_POST['submitNewsletter'], $_GET['submitNewsletter']);
+        $iso = (string) (\Context::getContext()->language->iso_code ?? 'en');
+        $controller->errors[] = self::MESSAGES['verify'][$iso] ?? self::MESSAGES['verify']['en'];
+    }
+
+    private static function newsletterOverLimit(string $ip): bool
+    {
+        if (false === filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        $db = \Db::getInstance();
+        if (!$db->executeS('SHOW TABLES LIKE \'' . _DB_PREFIX_ . 'emailsubscription\'')) {
+            return false;
+        }
+
+        return (int) $db->getValue(
+            'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'emailsubscription`
+             WHERE `ip_registration_newsletter` = \'' . pSQL($ip) . '\'
+               AND `id_shop` = ' . (int) (\Context::getContext()->shop->id ?? 0) . '
+               AND `newsletter_date_add` > \'' . pSQL(date('Y-m-d H:i:s', time() - 3600)) . '\''
+        ) >= self::MAX_NEWSLETTER_PER_IP_HOUR;
+    }
+
+    public static function verifyToken(string $token, string $ip, string $action = self::ACTION): bool
     {
         if ('' === $token || strlen($token) > 2048) {
             return false;
@@ -123,16 +191,16 @@ final class ContactGuardService
         $response = is_string($raw) ? json_decode($raw, true) : null;
 
         // Siteverify unreachable or malformed: fail closed.
-        return is_array($response) && self::isValidResponse($response, self::hostnames());
+        return is_array($response) && self::isValidResponse($response, self::hostnames(), $action);
     }
 
     /**
      * @param array<string, mixed> $response Siteverify JSON
      * @param string[] $hostnames allowed frontend hostnames
      */
-    public static function isValidResponse(array $response, array $hostnames): bool
+    public static function isValidResponse(array $response, array $hostnames, string $action = self::ACTION): bool
     {
-        if (true !== ($response['success'] ?? null) || self::ACTION !== ($response['action'] ?? null)) {
+        if (true !== ($response['success'] ?? null) || $action !== ($response['action'] ?? null)) {
             return false;
         }
         $hostname = strtolower((string) ($response['hostname'] ?? ''));
