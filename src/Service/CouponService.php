@@ -80,6 +80,10 @@ final class CouponService
             // PrestaShop only computes "selected products" reductions for percentages.
             throw new \RuntimeException('excludeManufacturers needs a percent rule');
         }
+        if ([] !== $excludeManufacturers) {
+            // PrestaShop's selected-products percentage uses the pre-sale price (tax incl.), so sale items are left out.
+            $excludeSpecial = true;
+        }
 
         // Issues of one series are serialized, so retirement always sees the other coupon's row.
         $lock = '' !== $group ? 'plunk_coupon_' . md5($idShop . '|' . $email . '|' . $group) : '';
