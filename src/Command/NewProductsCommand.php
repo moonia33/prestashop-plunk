@@ -15,6 +15,7 @@ namespace PlunkConnect\Command;
 
 use PlunkConnect\Api\PlunkClient;
 use PlunkConnect\Config;
+use PlunkConnect\Mapper\CatalogMapper;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -172,6 +173,7 @@ class NewProductsCommand extends Command
         $product = new \Product($idProduct, false, $idLang, $idShop);
         $cover = \Product::getCover($idProduct);
         $image = $link->getImageLink((string) $product->link_rewrite, (string) ($cover['id_image'] ?? 0), 'home_default');
+        $image = CatalogMapper::httpsUrl($image) ?? $image;
         $url = $link->getProductLink($product, null, null, null, $idLang, $idShop);
         $price = \Product::getPriceStatic($idProduct, true);
         $regular = \Product::getPriceStatic($idProduct, true, null, 2, null, false, false);

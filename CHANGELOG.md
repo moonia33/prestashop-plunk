@@ -4,6 +4,9 @@ All notable changes to `plunkconnect` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- `plunkconnect:newsletter:new-products`: product images use https (the CLI context built `http://` image links). Release 1.10.1.
+
 ### Added
 - `plunkconnect:winback`: daily, tracks `customer.winback` for subscribed customers whose last valid order is `--days` (90) old; `--window` grace, `--backlog=N` one-time catch-up (newest first), `--exclude-file` to skip addresses. Table `plunk_winback` keeps one row per (email, last order). Release 1.10.0.
 - `plunkconnect:newsletter:new-products`: sends a Plunk campaign (subscribed contacts) with the newest products (one per category first) when at least `minProducts` appeared since the last send, at most every `intervalDays`; settings in `PLUNKCONNECT_NEWPROD`.
