@@ -4,6 +4,9 @@ All notable changes to `plunkconnect` are documented here.
 
 ## [Unreleased]
 
+### Added
+- `plunkconnect:newsletter:new-products`: optional `segmentId` in `PLUNKCONNECT_NEWPROD` sends the campaign only to that Plunk segment (default: all subscribed). Release 1.10.2.
+
 ### Fixed
 - `plunkconnect:newsletter:new-products`: product images use https (the CLI context built `http://` image links). Release 1.10.1.
 

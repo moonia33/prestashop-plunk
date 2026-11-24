@@ -7,7 +7,8 @@
  * cover image) appeared since the last send and `intervalDays` passed, creates
  * and sends a Plunk campaign to subscribed contacts. Settings come from the
  * `PLUNKCONNECT_NEWPROD` JSON: subject, from, fromName, replyTo, body (HTML
- * with `%PRODUCTS%` and `%NEW_URL%`), minProducts (3), count (3), intervalDays (7).
+ * with `%PRODUCTS%` and `%NEW_URL%`), minProducts (3), count (3), intervalDays (7),
+ * segmentId (optional: send only to that Plunk segment instead of all subscribed).
  * `--test` sends the campaign only to that address and keeps the schedule.
  */
 
@@ -97,9 +98,7 @@ class NewProductsCommand extends Command
             'fromName' => (string) ($cfg['fromName'] ?? '') ?: null,
             'replyTo' => (string) ($cfg['replyTo'] ?? '') ?: null,
             'type' => 'MARKETING',
-            'audienceType' => 'FILTERED',
-            'audienceCondition' => ['logic' => 'AND', 'groups' => [['filters' => [['field' => 'subscribed', 'operator' => 'equals', 'value' => true]]]]],
-        ]);
+        ] + self::audience((string) ($cfg['segmentId'] ?? '')));
         $id = (string) ($created['body']['data']['id'] ?? '');
         if ('' === $id) {
             $output->writeln('campaign create failed: HTTP ' . $created['status'] . ' ' . substr((string) $created['raw'], -300));
@@ -125,6 +124,21 @@ class NewProductsCommand extends Command
     /**
      * @return array<int, array{id_product:int,id_category_default:int}>
      */
+    /**
+     * @return array<string, mixed>
+     */
+    public static function audience(string $segmentId): array
+    {
+        if ('' !== $segmentId) {
+            return ['audienceType' => 'SEGMENT', 'segmentId' => $segmentId];
+        }
+
+        return [
+            'audienceType' => 'FILTERED',
+            'audienceCondition' => ['logic' => 'AND', 'groups' => [['filters' => [['field' => 'subscribed', 'operator' => 'equals', 'value' => true]]]]],
+        ];
+    }
+
     private static function candidates(int $idShop, string $since): array
     {
         $rows = \Db::getInstance()->executeS(
