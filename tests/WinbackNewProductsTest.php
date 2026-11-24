@@ -25,4 +25,12 @@ final class WinbackNewProductsTest extends TestCase
         $this->assertSame([10, 8, 9], NewProductsCommand::pick($c, 3));
         $this->assertSame([10], NewProductsCommand::pick($c, 1));
     }
+
+    public function testAudienceUsesSegmentWhenSet(): void
+    {
+        $this->assertSame(['audienceType' => 'SEGMENT', 'segmentId' => 'seg-1'], NewProductsCommand::audience('seg-1'));
+        $all = NewProductsCommand::audience('');
+        $this->assertSame('FILTERED', $all['audienceType']);
+        $this->assertSame('subscribed', $all['audienceCondition']['groups'][0]['filters'][0]['field']);
+    }
 }
